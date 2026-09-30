@@ -1,0 +1,133 @@
+project:
+  name: "Fault-Aware Adaptive Digital Twin for Intelligent Industrial Motor Operation"
+  reference_asset: "WEG W22 IE3 5.5 kW 4P 132S"
+  reference_product_code: "13332532"
+  model_class: "MotorDigitalTwin.MotorElectroThermalMechanicalFaultable"
+
+reference_motor:
+  provenance:
+    source_type: "manufacturer_catalog_and_product_page"
+    manufacturer: "WEG"
+    family: "W22"
+    product_code: "13332532"
+    designation: "W22 IE3 5.5 kW 4P 132S 3Ph 230/400 V 50 Hz IC411-TEFC B3T"
+    product_page: "https://www.weg.net/catalog/weg/CI/en/Moteurs-%C3%89lectriques/Low-Voltage-IEC-Motors/Three-Phase/W22-/W22-IE3-5-5-kW-4P-132S-3Ph-230-400-V-50-Hz-IC411---TEFC---B3T/p/13332532"
+  published:
+    rated_output_W: 5500.0
+    rated_voltage_line_line_V: 400.0
+    alternate_voltage_line_line_V: 230.0
+    rated_current_A_at_400V: 10.9
+    rated_current_A_at_230V: 19.0
+    rated_frequency_Hz: 50.0
+    poles: 4
+    synchronous_speed_rpm: 1500.0
+    rated_speed_rpm: 1460.0
+    slip_percent: 2.67
+    rated_torque_kgfm: 3.67
+    efficiency_percent_at_100pct_load: 89.7
+    power_factor_at_100pct_load: 0.81
+    moment_of_inertia_kg_m2: 0.0491
+    temperature_rise_K: 80.0
+    ambient_min_C: -20.0
+    ambient_max_C: 40.0
+    service_factor: 1.00
+    duty: "S1"
+    insulation_class: "F"
+    enclosure: "IC411-TEFC"
+    ingress_protection: "IP55"
+    mounting: "B3T"
+
+  derived:
+    rated_speed_rad_s: 152.890842
+    rated_torque_Nm_from_power: 35.973378
+    rated_torque_Nm_from_catalog: 35.990405
+    rated_electrical_input_W_from_efficiency: 6131.54961
+    rated_total_loss_W: 631.54961
+    rated_total_thermal_resistance_K_per_W: 0.126673
+    expected_winding_temperature_C_at_25C_ambient: 105.0
+    expected_winding_temperature_C_at_40C_ambient: 120.0
+    apparent_power_VA_from_nameplate_rounding: 7567.328
+    active_power_W_from_V_I_PF_rounding: 6116.911
+
+thermal_model:
+  ambient_temperature_C: 25.0
+  winding_frame_Rth_K_per_W: 0.0400
+  frame_ambient_Rth_K_per_W: 0.086672
+  winding_thermal_capacitance_J_per_K: 1500.0
+  frame_thermal_capacitance_J_per_K: 9000.0
+  rated_winding_loss_fraction: 0.60
+  fixed_loss_fraction: 0.40
+  fixed_loss_no_load_factor: 0.80
+  source_note: >-
+    Total Rth is derived from the manufacturer's 80 K temperature-rise figure and
+    the efficiency-derived rated loss. The split between winding-frame and
+    frame-ambient Rth, and the thermal capacitances, are model-calibrated
+    assumptions and must not be described as manufacturer-published values.
+
+mechanical_model:
+  motor_inertia_kg_m2: 0.0491
+  viscous_friction_Nm_s_per_rad: 0.002
+  speed_controller_gain_Nm_s_per_rad: 0.50
+  maximum_torque_pu: 1.50
+  source_note: >-
+    Inertia is manufacturer-published. Friction and the simplified speed-loop
+    gain are reduced-order model assumptions.
+
+electrical_model:
+  line_voltage_V: 400.0
+  rated_current_A: 10.9
+  power_factor: 0.81
+  efficiency: 0.897
+  source_note: >-
+    Current, PF and efficiency are manufacturer-published. Partial-load current
+    and power are represented by a reduced-order scaling law; this is not a
+    detailed induction-machine electromagnetic model.
+
+fault_injection:
+  default_start_time_s: 600.0
+  sensor_bias_C: 10.0
+  sensor_freeze: false
+  cooling_efficiency: 0.40
+  rth_degradation: 1.0
+  unbalance_severity: 0.75
+
+safety:
+  winding_warning_C: 100.0
+  winding_critical_C: 120.0
+  vibration_warning_mm_s: 2.8
+  vibration_critical_mm_s: 4.5
+  minimum_load_pu: 0.50
+  reference_load_pu: 1.00
+
+simulation:
+  communication_step_s: 0.5
+  stop_time_s: 1800.0
+  default_load_pu: 1.00
+  default_speed_pu: 1.00
+  default_cooling_flow_pu: 1.00
+
+vr_trial_scenarios:
+  quiet_window_s: [30.0, 60.0]
+  profile_duration_s: 600.0
+  random_seed: 20260930
+  severity_bands:
+    medium_fault_severity: 0.50
+    emergency_temperature_C: 120.0
+  scenarios:
+    bearing_wear:
+      profile: ramp
+      target_unbalance_severity: 0.75
+      thermal_resistance_increase: 0.50
+    sudden_overload:
+      profile: step
+      load_increase_pu: 0.50
+    cooling_failure:
+      profile: accelerating
+      cooling_time_constant_s: 200.0
+    voltage_imbalance:
+      profile: ramp
+      target_voltage_imbalance_pu: 0.08
+      model_note: "Reduced-order loss/current-ripple approximation; not phase-resolved."
+    sensor_drift:
+      profile: ramp
+      target_sensor_bias_C: 10.0

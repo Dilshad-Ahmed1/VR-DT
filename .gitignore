@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+*.mat
+*.fmu
+results/
+Manuscript/
+docs/
+.pytest_cache/

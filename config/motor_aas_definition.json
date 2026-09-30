@@ -1,0 +1,74 @@
+{
+  "id": "https://rvce.edu.in/aas/motor/3ph_5kw_twin_01",
+  "idShort": "MotorDigitalTwinAAS",
+  "assetInformation": {
+    "assetKind": "Instance",
+    "globalAssetId": "https://rvce.edu.in/assets/motor/3ph_5kw_01"
+  },
+  "submodels": [
+    {
+      "id": "https://rvce.edu.in/aas/submodels/OperationalState",
+      "idShort": "OperationalState",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "SpeedPu", "valueType": "xs:double", "value": "1.0" },
+        { "modelType": "Property", "idShort": "LoadTorquePu", "valueType": "xs:double", "value": "1.0" },
+        { "modelType": "Property", "idShort": "PowerLossActualW", "valueType": "xs:double", "value": "300.0" }
+      ]
+    },
+    {
+      "id": "https://rvce.edu.in/aas/submodels/ElectricalState",
+      "idShort": "ElectricalState",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "VoltageRmsV", "valueType": "xs:double", "value": "400.0" },
+        { "modelType": "Property", "idShort": "CurrentRmsA", "valueType": "xs:double", "value": "9.5" },
+        { "modelType": "Property", "idShort": "PowerFactor", "valueType": "xs:double", "value": "0.85" },
+        { "modelType": "Property", "idShort": "ActivePowerW", "valueType": "xs:double", "value": "5600.0" },
+        { "modelType": "Property", "idShort": "ReactivePowerVar", "valueType": "xs:double", "value": "3470.0" },
+        { "modelType": "Property", "idShort": "TotalEnergyConsumedkWh", "valueType": "xs:double", "value": "0.0" }
+      ]
+    },
+    {
+      "id": "https://rvce.edu.in/aas/submodels/MechanicalState",
+      "idShort": "MechanicalState",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "SpeedRpm", "valueType": "xs:double", "value": "1498.0" },
+        { "modelType": "Property", "idShort": "SpeedRadS", "valueType": "xs:double", "value": "156.87" },
+        { "modelType": "Property", "idShort": "ElectromagneticTorqueNm", "valueType": "xs:double", "value": "31.83" },
+        { "modelType": "Property", "idShort": "LoadTorqueNm", "valueType": "xs:double", "value": "31.83" },
+        { "modelType": "Property", "idShort": "UsefulOutputWorkkWh", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "VibrationAmplitudeMmS", "valueType": "xs:double", "value": "0.8" },
+        { "modelType": "Property", "idShort": "UnbalanceSeverity", "valueType": "xs:double", "value": "0.0" }
+      ]
+    },
+    {
+      "id": "https://rvce.edu.in/aas/submodels/ThermalState",
+      "idShort": "ThermalState",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "WindingTemperatureK", "valueType": "xs:double", "value": "298.15" },
+        { "modelType": "Property", "idShort": "FrameTemperatureK", "valueType": "xs:double", "value": "298.15" },
+        { "modelType": "Property", "idShort": "WindingSensorMeasuredK", "valueType": "xs:double", "value": "298.15" },
+        { "modelType": "Property", "idShort": "ThermalMarginK", "valueType": "xs:double", "value": "121.85" }
+      ]
+    },
+    {
+      "id": "https://rvce.edu.in/aas/submodels/FaultState",
+      "idShort": "FaultState",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "SensorBiasActiveK", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SensorFreezeActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "CoolingEfficiencyFactor", "valueType": "xs:double", "value": "1.0" },
+        { "modelType": "Property", "idShort": "MechanicalUnbalanceActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "EstimatedFaultSeverity", "valueType": "xs:double", "value": "0.0" }
+      ]
+    },
+    {
+      "id": "https://rvce.edu.in/aas/submodels/ControlInterface",
+      "idShort": "ControlInterface",
+      "submodelElements": [
+        { "modelType": "Property", "idShort": "CoolingCommandPu", "valueType": "xs:double", "value": "1.0" },
+        { "modelType": "Property", "idShort": "LoadDeratingCommandPu", "valueType": "xs:double", "value": "1.0" },
+        { "modelType": "Property", "idShort": "OperatingMode", "valueType": "xs:string", "value": "NORMAL" }
+      ]
+    }
+  ]
+}

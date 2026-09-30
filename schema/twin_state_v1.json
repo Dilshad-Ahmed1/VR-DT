@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cgvr.local/schema/twin_state_v1.json",
+  "title": "CGVR Twin State v1",
+  "type": "object",
+  "required": ["schema_version", "tick", "monotonic_tick_timestamp_ns", "simulation_time_s", "measurements", "estimated_thermal", "faults", "severity", "prediction", "controller", "trial"],
+  "properties": {
+    "schema_version": {"const": "twin_state_v1"},
+    "tick": {"type": "integer", "minimum": 0},
+    "monotonic_tick_timestamp_ns": {"type": "integer", "minimum": 0},
+    "simulation_time_s": {"type": "number", "minimum": 0},
+    "scenario": {"type": "string"},
+    "measurements": {"type": "object", "additionalProperties": {"type": "number"}},
+    "estimated_thermal": {"type": "object"},
+    "faults": {"type": "object"},
+    "severity": {"type": "object", "required": ["overall", "band"]},
+    "prediction": {"type": "object", "required": ["winding_30s_C", "winding_60s_C"]},
+    "controller": {"type": "object", "required": ["operating_mode", "load_command_pu", "cooling_command_pu"]},
+    "trial": {"type": "object", "required": ["action_label", "correct_action"]}
+  }
+}

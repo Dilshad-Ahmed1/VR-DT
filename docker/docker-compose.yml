@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  basyx-aas-registry:
+    image: eclipsebasyx/aas-registry-log-mem:2.0.0-SNAPSHOT
+    container_name: basyx-aas-registry
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_PORT=8080
+      - BASYX_CORS_ALLOWED_ORIGINS=*
+      - BASYX_CORS_ALLOWED_METHODS=GET,POST,PATCH,DELETE,PUT,OPTIONS,HEAD
+      - BASYX_CORS_ALLOWED_HEADERS=*
+    networks:
+      - basyx-net
+
+  basyx-submodel-registry:
+    image: eclipsebasyx/submodel-registry-log-mem:2.0.0-SNAPSHOT
+    container_name: basyx-submodel-registry
+    ports:
+      - "8082:8082"
+    environment:
+      - SERVER_PORT=8082
+      - BASYX_CORS_ALLOWED_ORIGINS=*
+      - BASYX_CORS_ALLOWED_METHODS=GET,POST,PATCH,DELETE,PUT,OPTIONS,HEAD
+      - BASYX_CORS_ALLOWED_HEADERS=*
+    networks:
+      - basyx-net
+
+  basyx-aas-environment:
+    image: eclipsebasyx/aas-environment:2.0.0-SNAPSHOT
+    container_name: basyx-aas-environment
+    ports:
+      - "8081:8081"
+    environment:
+      - SERVER_PORT=8081
+      - BASYX_CORS_ALLOWED_ORIGINS=*
+      - BASYX_CORS_ALLOWED_METHODS=GET,POST,PATCH,DELETE,PUT,OPTIONS,HEAD
+      - BASYX_CORS_ALLOWED_HEADERS=*
+    depends_on:
+      - basyx-aas-registry
+      - basyx-submodel-registry
+    networks:
+      - basyx-net
+
+networks:
+  basyx-net:
+    driver: bridge

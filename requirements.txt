@@ -1,0 +1,12 @@
+numpy
+pandas
+PyYAML
+scipy
+matplotlib
+fmpy
+OMPython
+requests
+streamlit
+pytest
+fastapi
+uvicorn
