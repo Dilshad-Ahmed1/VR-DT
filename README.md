@@ -1,100 +1,138 @@
-# CGVR Induction Motor Digital Twin
+# Cyber-Resilient Industrial Motor Control Foundation
 
-This repository is the Python/Modelica foundation for a Computer Graphics and VR course project. It runs one 18.5 kW MSL squirrel-cage induction-motor digital twin, provides batch and live execution, records operator responses, and supports the future Unity or WebXR client.
+This repository is the simulation and digital-twin foundation for the future
+project **Cyber-Resilient Industrial Motor Control Using a Physics-Informed
+Digital Twin**. It currently contains one 18.5 kW MSL squirrel-cage induction
+motor plant, its FMU runtime, physical-fault experiments, the existing twin
+and controllers, optional BaSyx AAS synchronization, and a live operator-study
+server/UI.
 
-The human-subjects study compares a conventional 2D dashboard with an immersive VR interface. Both interfaces must receive the same live state from the Python server; neither client should reproduce the estimator, fault detector, severity calculation, predictor, or controller.
+Cyberattacks, Modbus monitoring, anomaly detection, cyber-versus-physical
+diagnosis, risk scoring, command prevention, and ML are not implemented. Do not
+interpret physical fault profiles as cyberattack scenarios.
 
-## Model Choice and Scope
+## Motor and Scope
 
-The sole runtime plant is `MotorDigitalTwin.InductionMotorDigitalTwin18kW`, implemented in [models/InductionMotorDigitalTwin18kW.mo](models/InductionMotorDigitalTwin18kW.mo). It composes the Modelica Standard Library 4.1.0 `IM_SquirrelCage` machine using the MSL `IMC_withLosses` 18.5 kW, 400 V, 50 Hz benchmark data. MSL does not identify a manufacturer or commercial product for this benchmark.
+The sole plant is `MotorDigitalTwin.InductionMotorDigitalTwin18kW` in
+`models/InductionMotorDigitalTwin18kW.mo`, built from the MSL 4.1.0
+`IM_SquirrelCage` and the `IMC_withLosses` benchmark. MSL does not identify a
+manufacturer or commercial motor product for this benchmark. Thermal RC
+values, actuator slew, fault magnitudes, and 100/120 C controller limits are
+model or study assumptions, not verified nameplate or insulation limits.
 
-The thermal network, fault amplitudes, diagnostic thresholds, load slew, and the inherited 100/120 C controller envelope include explicit modeling assumptions. They are not manufacturer ratings. See [INDUCTION_MOTOR_REFERENCE.md](INDUCTION_MOTOR_REFERENCE.md) for parameter provenance and limitations.
-
-There is no second 5.5 kW WEG model or fallback runtime profile. The induction plant has rotational mechanics but no radial dynamics; it does not simulate mechanical unbalance or vibration. `bearing_wear_proxy` injects increased mechanical friction only and must not be presented as a radial bearing/vibration model. Voltage imbalance uses a negative-sequence phase-voltage proxy and the FMU's filtered phase-RMS diagnostic; it is not a detailed faulted-machine winding model.
+The model has rotational mechanics, but no radial vibration/unbalance model.
+`bearing_wear_proxy` means added rotational friction only. Voltage imbalance is
+a phase-voltage negative-sequence proxy, not a faulted winding model. See
+[INDUCTION_MOTOR_REFERENCE.md](INDUCTION_MOTOR_REFERENCE.md) for parameter
+provenance and limitations.
 
 ## Architecture
 
 ```text
-models/InductionMotorDigitalTwin18kW.mo
-          | OpenModelica FMI 2.0 Co-Simulation export
-          v
-models/InductionMotorDigitalTwin18kW.fmu
+Twin pipeline / controller
           |
           v
-simulation/fmu_runtime.py
+CommunicationInterface  <- future SecurityAwareCommunication wrapper
           |
-          v
-server/twin_pipeline.py  (single shared runtime pipeline)
-  measurement normalization -> observer -> detector/severity
-  -> thermal predictor -> controller -> trial action oracle
+SimulatedCommunication  <- future PLC / Modbus TCP transport
           |
-          +--> experiments/experiment_runner.py -> batch CSV + metrics
-          +--> server/live_server.py -> HTTP + WebSocket state stream
-          +--> server/trial_logger.py -> participant response CSV/JSON
-          +--> integration/basyx_bridge.py -> optional AAS snapshot sync
+PlantInterface
+          |
+FMUPlant                <- future HardwarePlant
+          |
+MSL induction FMU
 ```
 
-`server/twin_pipeline.py` is the shared implementation for batch and live execution. It removes hidden MSL state and component-loss truth before the estimator/controller inputs are formed. `server/state_schema.py` builds the versioned `twin_state_v1` payload used by the live WebSocket and Streamlit live-study view.
+The primary contracts are in `plant/interface.py`:
 
-## Setup After Clone
+- `PlantState` carries observed motor/drive channels: timestamp, sensor
+  temperature, frame temperature, speed, current, measured line voltage,
+  electrical/shaft power, torque, frequency, power factor, and voltage
+  imbalance. Unsupported vibration is absent (`None`). FMU winding truth,
+  hidden fault inputs, and true thermal margin are not part of this interface.
+- `ControlCommand` carries requested load, speed, and cooling, timestamp,
+  command ID, source, and metadata.
+- `PlantInterface` defines start, stop, reset, read, command, and step behavior.
 
-Prerequisites:
+`FMUPlant` wraps `simulation/fmu_runtime.py`. Batch experiments and the live
+server both pass through `SimulatedCommunication`; physical fault injection
+is owned by `faults/physical.py`. `plant/evaluation.py` is an explicitly
+simulation-only channel for offline comparison metrics. It must never be
+passed to the twin pipeline or future cybersecurity layer. The AAS snapshot
+publishes diagnosed/estimated state, not injected scenario truth.
 
-- Windows PowerShell (commands below use Windows paths)
-- Python 3.12 or newer; this project has been tested with Python 3.13
-- OpenModelica 1.27.1 with Modelica Standard Library 4.1.0 when regenerating the FMU
-- Docker Desktop only if using optional BaSyx services
-- Unity or WebXR only for the separate VR client project
+Core source locations:
 
-Create an environment and install dependencies from the repository root:
+- `models/`: sole Modelica induction plant and generated FMU.
+- `plant/`, `communication/`: hardware-independent interfaces and adapters.
+- `faults/`: physical-fault injection and retained diagnostic entry points.
+- `server/twin_pipeline.py`: shared observer, detector/severity, predictor,
+  and controller pipeline.
+- `control/`, `twin/`: controller and existing estimator/diagnostic logic.
+- `experiments/experiment_runner.py`: batch experiment orchestration.
+- `server/live_server.py`, `server/state_schema.py`: live trial API and
+  versioned state payload for the UI/client.
+- `integration/`, `config/motor_aas_definition.json`: optional BaSyx AAS path.
+- `analysis/`: experiment and AAS metrics/comparison.
+- `ui/app.py`: batch viewer and live-study client.
+
+## Setup
+
+Use Python 3.12+ and the local environment. OpenModelica is needed only to
+check or regenerate the FMU. Docker Desktop is needed only for BaSyx.
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+\.venv\Scripts\python.exe -m pip install --upgrade pip
+\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-If activation is blocked or the machine has multiple Python installations, call the environment executable explicitly:
+Confirm the selected interpreter if the machine has multiple Python installs:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
+\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
 ```
 
-The `.fmu` is a generated build artifact and may not be included in a clone. Build it before running the experiment, test, UI, or live server commands below.
+The `.fmu` is generated and ignored by Git. A fresh clone must export it before
+running integration tests or experiments.
 
-## Build and Validate the FMU
+## Export and Validate the Plant
 
-Open `models/InductionMotorDigitalTwin18kW.mo` in OMEdit and run `Check -> Check Model`. Export the FMI 2.0 Co-Simulation FMU:
+Install OpenModelica 1.27.1 with Modelica Standard Library 4.1.0, open the
+Modelica source in OMEdit, and run `Check -> Check Model`. Then export:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\export_induction_fmu.py --overwrite
+\.venv\Scripts\python.exe scripts\export_induction_fmu.py --overwrite
 ```
 
-If OpenModelica is not on the expected install path, supply it explicitly:
+If OpenModelica is installed outside the default location:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\export_induction_fmu.py `
+\.venv\Scripts\python.exe scripts\export_induction_fmu.py `
   --omhome "C:/Program Files/OpenModelica1.27.1-64bit" `
   --overwrite
 ```
 
-The exporter checks the Modelica class and MSL 4.1.0, uses CVODE, exports FMI 2.0 Co-Simulation, verifies the interface, and writes `models/InductionMotorDigitalTwin18kW.fmu`.
+The exporter checks the model/MSL version, generates FMI 2.0 Co-Simulation,
+and validates the exported variables. It writes
+`models/InductionMotorDigitalTwin18kW.fmu`.
 
-Run the nominal FMU validation and then automated tests:
+Run nominal validation against this same FMU:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\validate_induction_motor_nominal.py
-.\.venv\Scripts\python.exe -m pytest -q
+\.venv\Scripts\python.exe scripts\validate_induction_motor_nominal.py
 ```
 
-The nominal validator steps the same FMU used by the Twin and writes a new timestamped validation directory under `results/induction_motor_nominal/`. It does not build or simulate a parallel plant model.
+The validator writes a timestamped CSV and JSON report below
+`results/induction_motor_nominal/`. Its current acceptance result is based on
+the explicit MSL nominal benchmark; it is not validation against an identified
+physical motor.
 
-For a short faulted FMU smoke test:
+For a short FMU/fault-injection smoke run:
 
 ```powershell
-.\.venv\Scripts\python.exe simulation\fmu_runtime.py `
+\.venv\Scripts\python.exe simulation\fmu_runtime.py `
   --fmu models\InductionMotorDigitalTwin18kW.fmu `
   --scenario voltage_imbalance `
   --stop 30 `
@@ -103,14 +141,15 @@ For a short faulted FMU smoke test:
   --output results\fmu_smoke.csv
 ```
 
-The induction FMU has been observed to fail with large OpenModelica CVODE communication steps during transients. `FMURuntime.step()` subdivides Twin cycles into at-most-0.1-second FMI steps while holding commands fixed; the controller cycle may remain 0.5 seconds.
+The CVODE FMU is stepped internally at no more than 0.1 s per FMI call; the
+controller communication cycle may remain 0.5 s.
 
-## Batch Experiments
+## Run Experiments
 
-Run one batch experiment through the shared pipeline:
+Run one scenario/controller case:
 
 ```powershell
-.\.venv\Scripts\python.exe -m experiments.experiment_runner `
+\.venv\Scripts\python.exe -m experiments.experiment_runner `
   --fmu models\InductionMotorDigitalTwin18kW.fmu `
   --plant-profile induction `
   --scenario cooling `
@@ -121,29 +160,18 @@ Run one batch experiment through the shared pipeline:
   --output results\cooling_constrained.csv
 ```
 
-Controllers are `baseline`, `adaptive`, and `constrained`. Supported induction scenarios are:
+Controllers are `baseline`, `adaptive`, and `constrained`. Supported physical
+scenarios are `healthy`, `sensor_bias`, `sensor_drift`, `sensor_freeze`,
+`cooling`, `cooling_failure`, `rth_degradation`, `overload`,
+`sudden_overload`, `mechanical_friction`, `bearing_wear_proxy`,
+`voltage_imbalance`, `supply_degradation`, `frequency_deviation`, and
+`combined_supported`. Scenario parameters/profile durations are in
+`config/twin_config.yaml`; injection behavior is in `faults/physical.py`.
 
-- `healthy`
-- `sensor_bias` and `sensor_drift` (additive temperature sensor bias; drift uses a ramp)
-- `sensor_freeze`
-- `cooling` and `cooling_failure` (accelerating cooling-effectiveness degradation)
-- `rth_degradation`
-- `overload` and `sudden_overload` (the latter is a commanded load increase through the FMU load input)
-- `mechanical_friction`
-- `bearing_wear_proxy` (friction-only proxy; no radial vibration channel exists)
-- `voltage_imbalance`
-- `supply_degradation`
-- `frequency_deviation`
-- `combined_supported`
-
-Faults are driven by [twin/fault_injector.py](twin/fault_injector.py) in both batch and live modes. The CLI `--fault-time` selects a reproducible onset time; each fault then follows its configured step, ramp, or accelerating profile. Profiles are configured in `config/twin_config.yaml`.
-
-The runner writes time-aligned FMU observations, estimated state, detected faults, severity, forecasts, raw controller mode, trial action label, solver/controller timings, and evaluation metrics. MSL component losses and winding state are retained only as named simulation truth for evaluation; they are not sent to the observer or controller.
-
-Run a timestamped matrix over all scenarios/controllers:
+Run the full scenario/controller campaign into a timestamped results folder:
 
 ```powershell
-.\.venv\Scripts\python.exe -m experiments.run_evaluation_suite `
+\.venv\Scripts\python.exe -m experiments.run_evaluation_suite `
   --fmu models\InductionMotorDigitalTwin18kW.fmu `
   --scenario all `
   --controller all `
@@ -152,159 +180,77 @@ Run a timestamped matrix over all scenarios/controllers:
   --step 0.5
 ```
 
-Each campaign receives a new UTC directory under `results/induction_campaigns/` with per-run CSV, metrics JSON, logs, and aggregate `comparison.csv`/`campaign.json`. Add `--with-basyx` only when the BaSyx services are running; the campaign enables it for the combined constrained case.
+Each campaign contains per-run CSV, metrics JSON, logs, `comparison.csv`, and
+`campaign.json` under `results/induction_campaigns/`. Use `--with-basyx` only
+when the Docker services are up. Add `--realtime` to an individual experiment
+to pace it against wall time and record missed software deadlines; this is not
+hard-real-time certification.
 
-## Live Server
-
-Start the server from the repository root:
-
-```powershell
-.\.venv\Scripts\python.exe -m server.live_server --host 127.0.0.1 --port 8000
-```
-
-The server defaults to the induction FMU, runs one live session at a time, and emits a WebSocket state every Twin tick. BaSyx is not the real-time transport.
-
-Check server status:
+Run tests and compare existing result CSVs:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
+\.venv\Scripts\python.exe -m pytest -q
+\.venv\Scripts\python.exe analysis\compare_evaluation.py `
+  --input-dir results `
+  --output results\compare.csv
 ```
 
-Start a trial. Fault onset is randomized within the quiet window from config and the returned onset tick is recorded for analysis:
+## Live Server and UI
+
+Start the shared live study API:
 
 ```powershell
-Invoke-RestMethod `
-  -Uri http://127.0.0.1:8000/trials/start `
-  -Method Post `
-  -ContentType 'application/json' `
-  -Body '{
-    "participant_id": "p001",
-    "condition": "vr",
-    "trial_id": "p001-vr-001",
-    "scenario": "cooling_failure",
-    "controller": "constrained",
-    "fmu": "models/InductionMotorDigitalTwin18kW.fmu",
-    "step_s": 0.5,
-    "stop_s": 900
-  }'
+\.venv\Scripts\python.exe -m server.live_server --host 127.0.0.1 --port 8000
 ```
 
-The conventional dashboard condition uses `"condition": "dashboard"`; VR uses `"condition": "vr"`.
-
-Connect clients to the shared state endpoint:
-
-```text
-ws://127.0.0.1:8000/ws
-```
-
-The contract is [schema/twin_state_v1.json](schema/twin_state_v1.json). It carries raw observable FMU telemetry, estimated thermal state, fault flags, severity and band, 30/60-second forecasts, controller identity/operating mode/commands, trial action, tick, and monotonic timestamp. Unity/WebXR and the 2D study dashboard must display this state without separately recalculating it.
-
-Submit a response:
+Start the Streamlit client in another terminal:
 
 ```powershell
-Invoke-RestMethod `
-  -Uri http://127.0.0.1:8000/respond `
-  -Method Post `
-  -ContentType 'application/json' `
-  -Body '{
-    "participant_id": "p001",
-    "condition": "vr",
-    "trial_id": "p001-vr-001",
-    "action": "derate",
-    "client_timestamp": 1791111111.123
-  }'
+\.venv\Scripts\python.exe -m streamlit run ui\app.py
 ```
 
-Allowed actions are `continue`, `derate`, and `shutdown`. Responses are scored against the controller state/action oracle and saved as CSV/JSON under `results/trials/`. The record includes participant, condition, scenario, onset/detection/response ticks, response time, response action, correct action, raw controller mode, trial action label, severity, correctness, and client timestamp.
-
-### Trial Oracle Semantics
-
-The raw controller mode and human-study action label are distinct fields. `NORMAL` maps to `continue`; intervention modes map to `derate`; `EMERGENCY` maps to `shutdown` for the study. That `shutdown` label is an experimental reinterpretation of `EMERGENCY`; the automatic controller itself does not issue shutdown and currently limits load to its configured minimum.
-
-The constrained controller's emergency condition is based on the maximum of estimated winding temperature and the 30/60-second predictions reaching 120 C. Its buffered `EMERGENCY_DERATING` state begins at 115 C with the current 5 C safety buffer. Medium severity also includes the existing controller intervention/fault-aware condition, including severity at or above 0.50 where relevant.
-
-## Streamlit Dashboard
-
-Start the 2D application:
-
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run ui\app.py
-```
-
-The sidebar offers two distinct modes:
-
-- **Batch results** launches induction experiments and views CSV outputs.
-- **Live operator study** starts a server trial, reads the shared `/ws` payload, displays it, and submits participant responses to `/respond`.
-
-The live page is a client of the canonical schema, not a second twin implementation. For a controlled study, the VR client should use the same trial ID, server, state payload, and response endpoint.
+The server exposes `/health`, `/trials/start`, `/respond`, and the WebSocket
+`/ws`. Its current payload contract is `schema/twin_state_v1.json`. Batch and
+live paths use the same `server/twin_pipeline.py`; client code must display the
+shared state rather than reimplement estimation, diagnosis, prediction, or
+control.
 
 ## Optional BaSyx AAS
 
-BaSyx remains an optional snapshot integration for the Industry 5.0/AAS deliverable. It is intentionally not used for VR real-time streaming. Docker services are in `docker/docker-compose.yml` and use in-memory persistence.
-
 ```powershell
 docker compose -f docker\docker-compose.yml up -d
-.\.venv\Scripts\python.exe scripts\seed_basyx.py
-.\.venv\Scripts\python.exe experiments\basyx_smoke_test.py
+\.venv\Scripts\python.exe scripts\seed_basyx.py
+\.venv\Scripts\python.exe experiments\basyx_smoke_test.py
 ```
 
-Endpoints:
+BaSyx is an optional REST snapshot integration, not the control/network
+transport. AAS snapshots include estimated/detected fault state and omit
+simulation-only injected severity.
 
-- AAS registry: `http://localhost:8080`
-- AAS environment: `http://localhost:8081`
-- Submodel registry: `http://localhost:8082`
+## Cybersecurity Work Starts Here
 
-## Tests
+The intended first cybersecurity component is a `SecurityAwareCommunication`
+adapter implementing `CommunicationInterface` and wrapping the transport used
+by the experiment/server. It can observe `PlantState` and `ControlCommand`
+without changing the FMU, estimator, or controller interfaces. Later work may
+add Modbus/device adapters, cyber-vs-physical diagnosis, what-if simulation,
+risk policy, and `ALLOW`/`MODIFY`/`BLOCK`/`SAFE-STATE` decisions. None of those
+algorithms or attack scenarios are present yet.
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
+When hardware is available, implement `HardwarePlant` and a PLC/VFD
+communication adapter that satisfy the existing contracts. Replace
+`FMUPlant`/`SimulatedCommunication`; keep the shared plant state, commands,
+twin pipeline, experiment metrics, and future security adapter.
 
-Tests cover controllers, the shared trial oracle/logger, induction FMU inputs and outputs, estimator/predictor/controller compatibility, AAS snapshots, and nominal benchmark evaluation. FMU integration tests skip when the generated FMU is absent; export it first for full validation.
+## Current Limitations
 
-## Where to Continue VR Work
-
-- Add the Unity/WebXR client in its own project; connect to `/ws` and parse `schema/twin_state_v1.json`.
-- Keep the 2D and VR conditions on identical server state and trial IDs.
-- Send exactly one action response per participant response to `/respond` and retain client input/render timestamps in client logs for latency analysis.
-- Do not route real-time visual state through BaSyx.
-- Add participant scheduling, balanced condition order, trial reset/stop lifecycle, authentication, and study data governance before a human-subject deployment.
-- Measure client/network/render latency on the actual study hardware; the Python/FMU loop is not a hard real-time system.
-
-## Limitations to Preserve
-
-- MSL benchmark is 18.5 kW, not an identified commercial product; the parameter source and assumptions are in `INDUCTION_MOTOR_REFERENCE.md`.
-- Thermal RC values and fault amplitudes are modeling/study assumptions.
-- 100 C and 120 C are inherited controller evaluation thresholds, not verified insulation limits for the benchmark motor.
-- The observer and predictor use observable measurements and nominal parameters; hidden FMU component-loss truth is evaluation-only.
-- Mechanical radial vibration/unbalance is not represented. Do not display the zero vibration output as a measured physical vibration value.
-- Voltage imbalance is a phase-voltage negative-sequence proxy, not a phase-resolved fault model.
-- `bearing_wear_proxy` means added rotational friction only; it does not simulate bearing geometry, radial vibration, or bearing temperature.
-- BaSyx is REST snapshot sync with in-memory services; it is not a persistence layer or real-time transport.
-- The experimental `shutdown` answer is an operator-study action label, not an automatic controller command.
-
-## Main Files
-
-```text
-models/InductionMotorDigitalTwin18kW.mo  sole Modelica plant and Twin
-models/InductionMotorDigitalTwin18kW.fmu generated FMI runtime artifact
-scripts/export_induction_fmu.py          Modelica check and FMU export
-scripts/validate_induction_motor_nominal.py nominal validation using the Twin FMU
-simulation/fmu_runtime.py                typed FMI I/O, lifecycle, and stepping
-twin/fault_injector.py                   shared batch/live induction fault profiles
-server/twin_pipeline.py                  shared induction estimator/control pipeline
-server/live_server.py                    FastAPI REST and WebSocket trial server
-server/state_schema.py                   state payload builder
-server/trial_logger.py                   participant response CSV/JSON
-schema/twin_state_v1.json                dashboard and VR client schema
-experiments/experiment_runner.py         batch experiment and AAS snapshot orchestration
-experiments/run_evaluation_suite.py      induction scenario/controller campaign
-control/                                  baseline, adaptive, constrained controllers
-twin/                                     observer, detector, severity, prediction
-config/twin_config.yaml                  active motor, safety, simulation, trial, AAS settings
-config/motor_aas_definition.json          six induction-motor AAS submodels
-integration/basyx_bridge.py              optional BaSyx REST bridge
-analysis/                                 experiment and AAS metrics/comparison
-ui/app.py                                 batch viewer and live dashboard client
-tests/                                    controller, FMU, pipeline, AAS, and nominal tests
-```
+- The benchmark is not an identified manufacturer's motor.
+- Thermal RC parameters and several fault amplitudes are explicit assumptions.
+- The 100 C and 120 C values are controller/evaluation thresholds, not verified
+  thermal limits for a physical asset.
+- No radial vibration or mechanical-unbalance behavior is modeled.
+- BaSyx uses in-memory development services and is not a real-time channel.
+- The server/UI live trial includes an operator response oracle; it is separate
+  from plant state and is not a cybersecurity prevention engine.
+- `results/` and FMU binaries are ignored by Git; retain external copies of
+  reproducibility evidence when required.

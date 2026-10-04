@@ -257,7 +257,7 @@ class FaultAwareAdaptiveController:
         )
 
         return ControlCommand(
-            load_pu=commanded_load,
-            speed_pu=1.0,
+            load_torque_pu=commanded_load,
+            requested_speed_pu=1.0,
             cooling_flow_pu=1.0,
         )

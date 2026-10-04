@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+from uuid import uuid4
 
 from control.adaptive_controller import FaultAwareAdaptiveController
-from control.baseline_controller import ControlCommand, BaselineThresholdController
+from control.baseline_controller import BaselineThresholdController
 from control.constrained_adaptive_controller import ConstrainedAdaptiveController
 from twin.fault_detector import FaultDetection, FaultDetector
 from twin.fault_severity import estimate_fault_severity
 from twin.predictor import ThermalForecast, ThermalPredictor
 from twin.state_estimator import StateEstimate, ThermalStateEstimator
+from plant.interface import ControlCommand
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,8 @@ class TwinPipeline:
         if controller_name not in {"baseline", "adaptive", "constrained"}:
             raise ValueError(f"Unknown controller: {controller_name}")
         self.controller_name = controller_name
+        self.command_namespace = uuid4().hex
+        self.command_sequence = 0
         self.config = config or PipelineConfig()
         self.estimator = ThermalStateEstimator(
             ambient_C=self.config.ambient_C,
@@ -357,14 +361,23 @@ class TwinPipeline:
                 sensor_reliability=sensor_reliability,
             )
             command = ControlCommand(
-                load_pu=output.load_command_pu,
-                speed_pu=1.0,
+                load_torque_pu=output.load_command_pu,
+                requested_speed_pu=1.0,
                 cooling_flow_pu=output.cooling_command_pu,
             )
             mode = output.operating_mode
             predicted_temperature = output.predicted_temperature_C
             safety_margin = output.safety_margin_C
             derating = output.derating_fraction
+        self.command_sequence += 1
+        command = replace(
+            command,
+            timestamp_s=float(measurement.get("timestamp_s", 0.0)),
+            command_id=(
+                f"{self.command_namespace}:{self.command_sequence}"
+            ),
+            source=f"controller:{self.controller_name}",
+        )
         timings.controller_latency_ms = (time.perf_counter() - started) * 1000.0
 
         if mode == "EMERGENCY":

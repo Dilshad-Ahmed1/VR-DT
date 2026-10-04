@@ -14,11 +14,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from control.baseline_controller import ControlCommand
+from communication.simulated import SimulatedCommunication
+from plant.simulated.fmu_plant import FMUPlant
 from server.state_schema import build_state
 from server.trial_logger import TrialLogger
 from server.twin_pipeline import TwinPipeline, pipeline_config_from_yaml
-from simulation.fmu_runtime import FMURuntime
-from twin.fault_injector import SCENARIO_DEFAULTS, injector_from_scenario
+from faults.physical import SCENARIO_DEFAULTS, injector_from_scenario
 
 
 class StartTrialRequest(BaseModel):
@@ -44,7 +45,8 @@ class LiveSession:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
         self.task: asyncio.Task[None] | None = None
-        self.runtime: FMURuntime | None = None
+        self.plant: FMUPlant | None = None
+        self.communication: SimulatedCommunication | None = None
         self.pipeline: TwinPipeline | None = None
         self.injector = None
         self.measurement: dict[str, float] | None = None
@@ -107,7 +109,32 @@ class LiveSession:
             parameters=trial_config.get("scenarios", {}).get(request.scenario),
         )
         self.pipeline = TwinPipeline(request.controller, pipeline_config_from_yaml(config))
-        self.runtime = FMURuntime(Path(request.fmu), stop_time=self.stop_s)
+        def modify_plant_inputs(
+            simulation_time_s: float,
+            command_inputs: dict[str, Any],
+        ) -> dict[str, Any]:
+            inputs = {
+                **command_inputs,
+                "f_sensor_bias_C": 0.0,
+                "f_sensor_freeze": False,
+                "f_cooling_eff": 1.0,
+                "f_rth_degradation": 1.0,
+                "f_load_overload_pu": 0.0,
+                "f_mechanical_friction_factor": 1.0,
+                "f_voltage_unbalance_pu": 0.0,
+                "f_supply_voltage_degradation_pu": 0.0,
+                "f_supply_frequency_deviation_pu": 0.0,
+            }
+            if self.injector is not None:
+                inputs = self.injector.apply(self.tick, inputs)
+            return inputs
+
+        self.plant = FMUPlant(
+            Path(request.fmu),
+            stop_time_s=self.stop_s,
+            input_modifier=modify_plant_inputs,
+        )
+        self.communication = SimulatedCommunication(self.plant)
         self.started_at = time.monotonic()
         self.task = asyncio.create_task(self._run(config))
         return {
@@ -118,40 +145,20 @@ class LiveSession:
         }
 
     async def _run(self, config: dict[str, Any]) -> None:
-        assert self.runtime is not None
+        assert self.plant is not None
+        assert self.communication is not None
         assert self.pipeline is not None
-        simulation = config.get("simulation", {})
-        inputs: dict[str, Any] = {
-            "u_load_torque_pu": float(simulation.get("default_load_pu", 1.0)),
-            "u_speed_pu": float(simulation.get("default_speed_pu", 1.0)),
-            "u_cooling_flow_pu": float(simulation.get("default_cooling_flow_pu", 1.0)),
-            "f_sensor_bias_C": 0.0,
-            "f_sensor_freeze": False,
-            "f_cooling_eff": 1.0,
-            "f_rth_degradation": 1.0,
-            "f_load_overload_pu": 0.0,
-            "f_mechanical_friction_factor": 1.0,
-            "f_voltage_unbalance_pu": 0.0,
-            "f_supply_voltage_degradation_pu": 0.0,
-            "f_supply_frequency_deviation_pu": 0.0,
-        }
         try:
-            self.measurement = self.runtime.initialize(inputs)
+            self.plant.start()
+            self.measurement = self.communication.read_state().as_measurement()
             self.pipeline.reset(self.measurement)
-            while self.runtime.current_time < self.stop_s - 1e-12:
+            while self.plant.current_time_s < self.stop_s - 1e-12:
                 cycle_start = time.perf_counter()
                 assert self.measurement is not None
-                inputs.update({
-                    "u_load_torque_pu": self.previous_command.load_pu,
-                    "u_speed_pu": self.previous_command.speed_pu,
-                    "u_cooling_flow_pu": self.previous_command.cooling_flow_pu,
-                })
-                if self.injector is not None:
-                    inputs = self.injector.apply(self.tick, inputs)
                 result = self.pipeline.tick(self.measurement, self.previous_command, self.step_s)
                 state = build_state(
                     self.tick,
-                    self.runtime.current_time,
+                    self.plant.current_time_s,
                     self.scenario,
                     result.twin_measurement,
                     result,
@@ -164,13 +171,15 @@ class LiveSession:
                 self.latest_state = state
                 self.states[self.tick] = state
                 await self._broadcast(state)
-                actual_step = min(self.step_s, self.stop_s - self.runtime.current_time)
-                self.measurement, _ = self.runtime.step(actual_step, inputs)
+                actual_step = min(self.step_s, self.stop_s - self.plant.current_time_s)
+                self.communication.send_command(result.command)
+                next_state = self.communication.step(actual_step)
+                self.measurement = next_state.as_measurement()
                 self.previous_command = result.command
                 self.tick += 1
                 await asyncio.sleep(max(0.0, self.step_s - (time.perf_counter() - cycle_start)))
         finally:
-            self.runtime.close()
+            self.plant.stop()
 
     async def _broadcast(self, state: dict[str, Any]) -> None:
         stale: list[WebSocket] = []

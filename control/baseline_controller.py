@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-@dataclass
-class ControlCommand:
-    load_pu: float
-    speed_pu: float = 1.0
-    cooling_flow_pu: float = 1.0
+from plant.interface import ControlCommand
 
 
 class BaselineThresholdController:
@@ -40,4 +33,9 @@ class BaselineThresholdController:
             load = self.reference_load_pu - alpha * (self.reference_load_pu - self.minimum_load_pu)
         else:
             load = self.reference_load_pu
-        return ControlCommand(load_pu=max(self.minimum_load_pu, min(self.reference_load_pu, load)))
+        return ControlCommand(
+            load_torque_pu=max(
+                self.minimum_load_pu,
+                min(self.reference_load_pu, load),
+            ),
+        )

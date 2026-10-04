@@ -15,8 +15,9 @@ from fmpy import read_model_description
 
 from analysis.experiment_metrics import compute_experiment_metrics
 from integration.basyx_bridge import BaSyxBridge
-from control.baseline_controller import ControlCommand
-from simulation.fmu_runtime import FMURuntime
+from communication.simulated import SimulatedCommunication
+from plant.interface import ControlCommand
+from plant.simulated.fmu_plant import FMUPlant
 from server.twin_pipeline import (
     PipelineConfig,
     TwinPipeline,
@@ -24,7 +25,7 @@ from server.twin_pipeline import (
     digital_twin_measurement,
     pipeline_config_from_yaml,
 )
-from twin.fault_injector import SCENARIO_DEFAULTS, FaultInjector, injector_from_scenario
+from faults.physical import SCENARIO_DEFAULTS, FaultInjector, injector_from_scenario
 from analysis.basyx_metrics import BaSyxEvaluationMetrics
 
 
@@ -245,9 +246,6 @@ def build_basyx_snapshot(
     elapsed_energy_kwh: float,
     useful_work_kwh: float,
     forecast,
-    scenario_name: str,
-    fault_active: bool,
-    true_fault_severities: dict[str, float],
     controller_name: str,
     plant_profile: str,
     simulation_time_s: float,
@@ -284,7 +282,6 @@ def build_basyx_snapshot(
         * (synchronous_speed_rpm - speed_rpm)
         / max(synchronous_speed_rpm, 1e-9)
     )
-    true_fault_severity = max(true_fault_severities.values(), default=0.0)
     load_pu = float(command.load_pu)
     if load_pu >= 0.99:
         operating_mode = "NORMAL"
@@ -300,14 +297,14 @@ def build_basyx_snapshot(
     operational = {
         "SpeedPu": (
             speed_rad_s
-            / max(float(measurement.get("rated_speed_rad_s", 152.890842)), 1e-9)
+            / max(float(measurement.get("rated_speed_rad_s", 153.153)), 1e-9)
         ),
         "LoadTorquePu": (
             float(
                 measurement[
                     "torque_load_Nm"
                 ]
-            ) / max(float(measurement.get("rated_torque_Nm", 35.973378)), 1e-9)
+            ) / max(float(measurement.get("rated_torque_Nm", 120.794521)), 1e-9)
         ),
         "PowerLossActualW": float(
             measurement["observed_power_loss_W"]
@@ -315,7 +312,7 @@ def build_basyx_snapshot(
             else measurement["P_loss_total_W"]
         ),
         "PlantProfile": plant_profile,
-        "MotorRatedOutputW": float(measurement.get("rated_output_W", 5500.0)),
+        "MotorRatedOutputW": float(measurement.get("rated_output_W", 18500.0)),
     }
 
     # --------------------------------------------------------------
@@ -349,9 +346,7 @@ def build_basyx_snapshot(
         "RatedVoltageRmsV": float(
             measurement.get("rated_voltage_line_line_V", 400.0)
         ),
-        "RatedCurrentRmsA": float(
-            measurement.get("rated_current_A", 10.9)
-        ),
+        "RatedCurrentRmsA": float(measurement.get("rated_current_A", 32.85)),
         "Efficiency": (
             float(measurement["P_shaft_W"])
             / float(measurement["P_electrical_W"])
@@ -385,18 +380,6 @@ def build_basyx_snapshot(
             useful_work_kwh
         ),
 
-        "VibrationAmplitudeMmS": float(
-            measurement[
-                "vibration_mm_s_out"
-            ]
-        ),
-
-        # Estimated—not hidden truth.
-        "UnbalanceSeverity": float(
-            severity[
-                "mechanical_unbalance"
-            ]
-        ),
         "SynchronousSpeedRpm": synchronous_speed_rpm,
         "SlipPercent": slip_percent,
         "LoadCommandTorqueNm": (
@@ -471,17 +454,12 @@ def build_basyx_snapshot(
             ),
         ),
 
-        "MechanicalUnbalanceActive": bool(
-            detection.mechanical_unbalance
-        ),
-
         "EstimatedFaultSeverity": float(
             severity["overall"]
         ),
-        "FaultActive": fault_active,
-        "FaultType": scenario_name if fault_active else "healthy",
+        "FaultActive": bool(detection.any_fault),
+        "FaultType": str(detection.primary_fault),
         "PrimaryDetectedFault": detection.primary_fault,
-        "TrueFaultSeverity": true_fault_severity if fault_active else 0.0,
         "CoolingFaultActive": bool(detection.cooling_degradation),
         "OverloadFaultActive": bool(detection.load_overload),
         "MechanicalFrictionFaultActive": bool(detection.mechanical_friction),
@@ -666,28 +644,41 @@ def run_experiment(
     # FMU runtime
     # -------------------------
 
-    with FMURuntime(
+    def modify_plant_inputs(
+        simulation_time_s: float,
+        command_inputs: dict[str, Any],
+    ) -> dict[str, Any]:
+        tick = int(round(simulation_time_s / step))
+        inputs = {
+            **command_inputs,
+            "f_sensor_bias_C": 0.0,
+            "f_sensor_freeze": False,
+            "f_cooling_eff": 1.0,
+            "f_rth_degradation": 1.0,
+            "f_load_overload_pu": 0.0,
+            "f_mechanical_friction_factor": 1.0,
+            "f_voltage_unbalance_pu": 0.0,
+            "f_supply_voltage_degradation_pu": 0.0,
+            "f_supply_frequency_deviation_pu": 0.0,
+        }
+        return injector.apply(tick, inputs) if injector is not None else inputs
+
+    with FMUPlant(
         fmu_path,
-        stop_time=stop_time,
-    ) as runtime:
+        stop_time_s=stop_time,
+        input_modifier=modify_plant_inputs,
+    ) as plant:
+        communication = SimulatedCommunication(plant)
 
-        if runtime.plant_profile != plant_profile:
-            raise RuntimeError(
-                f"FMU profile mismatch: selected {plant_profile!r}, "
-                f"runtime identified {runtime.plant_profile!r}."
-            )
-        if runtime.plant_profile != "induction":
-            raise RuntimeError("The active CGVR runtime requires the induction FMU.")
-
-        # The runtime pipeline normalizes measurements once and initializes
-        # the observer without exposing hidden MSL state to the twin.
-        raw_measurement = runtime.initialize()
+        # Controllers and twin components consume only normalized plant
+        # observations. FMU truth is kept on the evaluation-only channel.
+        raw_measurement = communication.read_state().as_measurement()
         measurement = pipeline.reset(raw_measurement)
 
         # Initial command.
         current_command = ControlCommand(
-            load_pu=ref_load,
-            speed_pu=1.0,
+            load_torque_pu=ref_load,
+            requested_speed_pu=1.0,
             cooling_flow_pu=1.0,
         )
 
@@ -700,10 +691,13 @@ def run_experiment(
         if realtime:
             realtime_wall_start = time.perf_counter()
 
-        while runtime.current_time < stop_time - 1e-12:
+        while plant.current_time_s < stop_time - 1e-12:
 
             # Current simulation instant.
-            t = runtime.current_time
+            t = plant.current_time_s
+            evaluation_before_step = (
+                plant.read_simulation_evaluation().as_dict()
+            )
             if realtime and realtime_wall_start is not None:
                 scheduled_start = realtime_wall_start + t
                 wait_s = scheduled_start - time.perf_counter()
@@ -740,23 +734,6 @@ def run_experiment(
             # 5. APPLY FAULT + CONTROL INPUTS
             # -----------------------------------------------------------
 
-            inputs = {
-                "u_load_torque_pu": next_command.load_pu,
-                "u_speed_pu": next_command.speed_pu,
-                "u_cooling_flow_pu": next_command.cooling_flow_pu,
-                "f_sensor_bias_C": 0.0,
-                "f_sensor_freeze": False,
-                "f_cooling_eff": 1.0,
-                "f_rth_degradation": 1.0,
-                "f_load_overload_pu": 0.0,
-                "f_mechanical_friction_factor": 1.0,
-                "f_voltage_unbalance_pu": 0.0,
-                "f_supply_voltage_degradation_pu": 0.0,
-                "f_supply_frequency_deviation_pu": 0.0,
-            }
-            if injector is not None:
-                inputs = injector.apply(tick, inputs)
-
             # ------------------------------------------------------------
             # 6. SYNCHRONIZE AAS SNAPSHOT AT THE CURRENT TIME
             # ------------------------------------------------------------
@@ -772,12 +749,6 @@ def run_experiment(
                     >= basyx_period_s - 1e-12
                 )
             ):
-                true_fault_severities = _true_fault_severities(
-                    scenario_name,
-                    fault_active,
-                    injector,
-                    tick,
-                )
                 snapshot_timestamp_utc = datetime.now(
                     timezone.utc
                 ).isoformat(timespec="milliseconds")
@@ -785,7 +756,7 @@ def run_experiment(
                     f"{aas_run_id}:{aas_snapshot_sequence}"
                 )
                 snapshot = build_basyx_snapshot(
-                    measurement=measurement,
+                    measurement=twin_measurement,
                     estimate=estimate,
                     detection=detection,
                     severity=severity,
@@ -793,9 +764,6 @@ def run_experiment(
                     elapsed_energy_kwh=elapsed_energy_kwh,
                     useful_work_kwh=useful_work_kwh,
                     forecast=forecast,
-                    scenario_name=scenario_name,
-                    fault_active=fault_active,
-                    true_fault_severities=true_fault_severities,
                     controller_name=controller_name,
                     plant_profile=plant_profile,
                     simulation_time_s=float(t),
@@ -875,12 +843,14 @@ def run_experiment(
                 / 3_600_000.0
             )
 
-            raw_post_measurement, solver_time_s = runtime.step(
-                actual_step,
-                inputs,
+            communication.send_command(next_command)
+            communication.step(actual_step)
+            solver_time_s = float(
+                plant.read_simulation_evaluation()
+                .outputs["solver_step_time_s"]
             )
-            post_measurement = pipeline.adapt_measurement(raw_post_measurement)
-            raw_measurement = raw_post_measurement
+            raw_measurement = communication.read_state().as_measurement()
+            post_measurement = pipeline.adapt_measurement(raw_measurement)
 
             cycle_wall_end = time.perf_counter()
             realtime_cycle_latency_ms = (
@@ -1213,6 +1183,7 @@ def run_experiment(
             # Add CURRENT FMU measurements
             # -----------------------------------------------------------
 
+            row.update(evaluation_before_step)
             row.update(measurement)
 
             rows.append(row)

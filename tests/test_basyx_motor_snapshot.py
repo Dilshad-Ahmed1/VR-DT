@@ -44,6 +44,9 @@ def test_aas_definition_contains_the_required_motor_telemetry() -> None:
         "ElectromagneticTorqueNm",
         "LoadTorqueNm",
     } <= submodels["MechanicalState"]
+    assert "VibrationAmplitudeMmS" not in submodels["MechanicalState"]
+    assert "UnbalanceSeverity" not in submodels["MechanicalState"]
+    assert "MechanicalUnbalanceActive" not in submodels["FaultState"]
     assert {
         "WindingTemperatureK",
         "FrameTemperatureK",
@@ -54,9 +57,9 @@ def test_aas_definition_contains_the_required_motor_telemetry() -> None:
     assert {
         "FaultType",
         "FaultActive",
-        "TrueFaultSeverity",
         "EstimatedFaultSeverity",
     } <= submodels["FaultState"]
+    assert "TrueFaultSeverity" not in submodels["FaultState"]
     assert {
         "LoadDeratingCommandPu",
         "CoolingCommandPu",
@@ -87,8 +90,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         "T_ambient_C": 20.0,
         "torque_motor_Nm": 110.0,
         "torque_load_Nm": 100.0,
-        "vibration_mm_s_out": 0.0,
-        "mechanical_unbalance_supported": 0.0,
         "thermal_margin_to_critical_K": 30.0,
     }
     estimate = SimpleNamespace(
@@ -100,12 +101,12 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         sensor_bias=False,
         sensor_freeze=False,
         cooling_degradation=True,
-        mechanical_unbalance=False,
         load_overload=False,
         mechanical_friction=False,
         voltage_imbalance=False,
         supply_degradation=False,
         frequency_deviation=False,
+        any_fault=True,
         primary_fault="cooling_degradation",
     )
     forecast = SimpleNamespace(
@@ -115,7 +116,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
     severity = {
         "overall": 0.4,
         "cooling_degradation": 0.4,
-        "mechanical_unbalance": 0.0,
     }
     snapshot = build_basyx_snapshot(
         measurement=measurement,
@@ -126,9 +126,6 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
         elapsed_energy_kwh=1.2,
         useful_work_kwh=1.0,
         forecast=forecast,
-        scenario_name="cooling",
-        fault_active=True,
-        true_fault_severities={"cooling": 0.4},
         controller_name="constrained",
         plant_profile="induction",
         simulation_time_s=351.0,
@@ -158,7 +155,7 @@ def test_snapshot_values_and_identity_share_one_simulation_instant() -> None:
     assert snapshot["thermal"]["PredictedTemperature60sK"] == 377.15
     assert snapshot["electrical"]["FrequencyHz"] == 49.5
     assert snapshot["mechanical"]["SlipPercent"] > 0.0
-    assert snapshot["fault"]["FaultType"] == "cooling"
-    assert snapshot["fault"]["TrueFaultSeverity"] == 0.4
+    assert snapshot["fault"]["FaultType"] == "cooling_degradation"
+    assert "TrueFaultSeverity" not in snapshot["fault"]
     assert snapshot["fault"]["EstimatedFaultSeverity"] == 0.4
     assert snapshot["control"]["ControllerName"] == "constrained"

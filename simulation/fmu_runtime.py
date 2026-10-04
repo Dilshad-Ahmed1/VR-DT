@@ -342,7 +342,7 @@ def run(
     scenario: str = "cooling",
 ) -> None:
     """Run an induction FMU smoke test through the shared fault injector."""
-    from twin.fault_injector import SCENARIO_DEFAULTS, injector_from_scenario
+    from faults.physical import SCENARIO_DEFAULTS, injector_from_scenario
 
     if scenario != "healthy" and scenario not in SCENARIO_DEFAULTS:
         raise ValueError(f"Unsupported induction scenario: {scenario}")
