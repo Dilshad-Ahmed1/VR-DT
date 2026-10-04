@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import random
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -17,23 +18,23 @@ from server.state_schema import build_state
 from server.trial_logger import TrialLogger
 from server.twin_pipeline import TwinPipeline, pipeline_config_from_yaml
 from simulation.fmu_runtime import FMURuntime
-from twin.fault_injector import injector_from_scenario
+from twin.fault_injector import SCENARIO_DEFAULTS, injector_from_scenario
 
 
 class StartTrialRequest(BaseModel):
     participant_id: str = "anonymous"
-    condition: str = "vr"
+    condition: Literal["vr", "dashboard"] = "vr"
     trial_id: str | None = None
     scenario: str = "sensor_drift"
     controller: str = "constrained"
-    fmu: str = "MotorElectroThermalMechanicalFaultable.fmu"
+    fmu: str = "models/InductionMotorDigitalTwin18kW.fmu"
     step_s: float = 0.5
     stop_s: float = 1800.0
 
 
 class ResponseRequest(BaseModel):
     participant_id: str
-    condition: str
+    condition: Literal["dashboard", "vr"]
     trial_id: str
     action: str
     client_timestamp: float
@@ -64,6 +65,15 @@ class LiveSession:
     async def start(self, request: StartTrialRequest) -> dict[str, Any]:
         if self.task and not self.task.done():
             raise RuntimeError("a live trial is already running")
+        if request.scenario != "healthy" and request.scenario not in SCENARIO_DEFAULTS:
+            raise ValueError(f"unsupported induction scenario: {request.scenario}")
+        if request.controller != "constrained":
+            raise ValueError(
+                "live human-subject trials require the constrained controller "
+                "because the trial oracle is tied to its EMERGENCY state."
+            )
+        if request.step_s <= 0.0 or request.stop_s <= 0.0:
+            raise ValueError("step_s and stop_s must be positive")
 
         config = yaml.safe_load(Path("config/twin_config.yaml").read_text(encoding="utf-8")) or {}
         trial_config = config.get("vr_trial_scenarios", {})
@@ -77,14 +87,24 @@ class LiveSession:
         self.states.clear()
         self.latest_state = None
         quiet = trial_config.get("quiet_window_s", [30.0, 60.0])
-        seed = int(trial_config.get("random_seed", 0)) ^ hash(self.trial_id)
-        start_s = random.Random(seed).uniform(float(quiet[0]), float(quiet[1]))
-        self.fault_onset_tick = int(round(start_s / self.step_s))
+        trial_hash = int.from_bytes(
+            hashlib.sha256(self.trial_id.encode("utf-8")).digest()[:8],
+            "big",
+        )
+        seed = int(trial_config.get("random_seed", 0)) ^ trial_hash
+        if request.scenario == "healthy":
+            self.fault_onset_tick = -1
+        else:
+            start_s = random.Random(seed).uniform(float(quiet[0]), float(quiet[1]))
+            self.fault_onset_tick = int(round(start_s / self.step_s))
+            if self.stop_s <= start_s:
+                raise ValueError("trial duration must extend beyond the randomized fault onset")
         self.injector = None if request.scenario == "healthy" else injector_from_scenario(
             request.scenario,
             start_tick=self.fault_onset_tick,
             step_s=self.step_s,
             duration_s=float(trial_config.get("profile_duration_s", 600.0)),
+            parameters=trial_config.get("scenarios", {}).get(request.scenario),
         )
         self.pipeline = TwinPipeline(request.controller, pipeline_config_from_yaml(config))
         self.runtime = FMURuntime(Path(request.fmu), stop_time=self.stop_s)
@@ -109,8 +129,11 @@ class LiveSession:
             "f_sensor_freeze": False,
             "f_cooling_eff": 1.0,
             "f_rth_degradation": 1.0,
-            "f_unbalance_severity": 0.0,
-            "f_voltage_imbalance_pu": 0.0,
+            "f_load_overload_pu": 0.0,
+            "f_mechanical_friction_factor": 1.0,
+            "f_voltage_unbalance_pu": 0.0,
+            "f_supply_voltage_degradation_pu": 0.0,
+            "f_supply_frequency_deviation_pu": 0.0,
         }
         try:
             self.measurement = self.runtime.initialize(inputs)
@@ -126,7 +149,13 @@ class LiveSession:
                 if self.injector is not None:
                     inputs = self.injector.apply(self.tick, inputs)
                 result = self.pipeline.tick(self.measurement, self.previous_command, self.step_s)
-                state = build_state(self.tick, self.runtime.current_time, self.scenario, self.measurement, result)
+                state = build_state(
+                    self.tick,
+                    self.runtime.current_time,
+                    self.scenario,
+                    result.twin_measurement,
+                    result,
+                )
                 state["trial"].update({
                     "trial_id": self.trial_id,
                     "fault_onset_tick": self.fault_onset_tick,
@@ -156,6 +185,8 @@ class LiveSession:
     def respond(self, request: ResponseRequest) -> dict[str, Any]:
         if request.trial_id != self.trial_id:
             raise ValueError("unknown trial_id")
+        if request.participant_id != self.participant_id or request.condition != self.condition:
+            raise ValueError("response participant or condition does not match the active trial")
         if not self.states:
             raise ValueError("the trial has not produced a state")
         state = self.latest_state or self.states[max(self.states)]
@@ -198,6 +229,8 @@ async def start_trial(request: StartTrialRequest) -> dict[str, Any]:
         return await session.start(request)
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/respond")

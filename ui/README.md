@@ -1,17 +1,17 @@
-# Motor Digital Twin Studio
+# Streamlit Client
 
-This standalone Streamlit frontend does not modify or duplicate the motor controller, FMU, experiment runner, or evaluation logic. It runs the existing commands and visualizes their CSV/JSON results.
+The Streamlit app supports both batch result browsing and the conventional 2D live-study condition. It does not implement twin calculations: the live page reads `schema/twin_state_v1.json` from the Python server's `/ws` endpoint and posts participant responses to `/respond`.
 
-Install Streamlit once from the project root:
-
-```powershell
-.venv\Scripts\python -m pip install streamlit
-```
-
-Start the frontend:
+After creating `.venv`, installing `requirements.txt`, and exporting the induction FMU, start the live server in one terminal:
 
 ```powershell
-.venv\Scripts\python -m streamlit run ui\app.py
+.\.venv\Scripts\python.exe -m server.live_server --host 127.0.0.1 --port 8000
 ```
 
-It exposes the existing experiment CLI settings (scenario, controller, duration, step, fault time, and optional BaSyx settings), runs the existing comparison command, provides an interactive motor visualization, time-series plots, comparison tables, and CSV/JSON downloads.
+Start Streamlit in another terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run ui\app.py
+```
+
+Select **Live operator study** for the shared WebSocket state and `/respond` workflow. Select **Batch results** to launch experiments and inspect CSV outputs. The Unity/WebXR client must use the same server endpoint and payload contract for controlled comparisons.

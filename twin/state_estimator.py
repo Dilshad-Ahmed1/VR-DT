@@ -40,6 +40,8 @@ class ThermalStateEstimator:
         initial_winding_C: float = 30.0,
         initial_frame_C: float = 27.0,
         correction_gain: float = 0.35,
+        cooling_flow_offset: float = 0.10,
+        cooling_flow_gain: float = 0.90,
     ) -> None:
 
         self.ambient_C = ambient_C
@@ -52,6 +54,8 @@ class ThermalStateEstimator:
 
         self.winding_loss_fraction = winding_loss_fraction
         self.fixed_loss_fraction = fixed_loss_fraction
+        self.cooling_flow_offset = cooling_flow_offset
+        self.cooling_flow_gain = cooling_flow_gain
 
         self.correction_gain = correction_gain
 
@@ -82,10 +86,18 @@ class ThermalStateEstimator:
 
         self.initialized = True
 
-    @staticmethod
     def _losses(
+        self,
         measurement: dict[str, float],
     ) -> tuple[float, float]:
+        if (
+            "P_winding_losses_W" in measurement
+            and "P_fixed_losses_W" in measurement
+        ):
+            return (
+                max(0.0, float(measurement["P_winding_losses_W"])),
+                max(0.0, float(measurement["P_fixed_losses_W"])),
+            )
 
         p_electrical = max(
             0.0,
@@ -109,12 +121,17 @@ class ThermalStateEstimator:
 
         total_loss = max(
             0.0,
-            p_electrical - p_shaft,
+            float(
+                measurement.get(
+                    "P_loss_total_W",
+                    p_electrical - p_shaft,
+                )
+            ),
         )
 
         return (
-            total_loss * 0.60,
-            total_loss * 0.40,
+            total_loss * self.winding_loss_fraction,
+            total_loss * self.fixed_loss_fraction,
         )
 
     def update(
@@ -122,6 +139,7 @@ class ThermalStateEstimator:
         measurement: dict[str, float],
         cooling_flow_pu: float,
         dt_s: float,
+        cooling_effectiveness: float = 1.0,
     ) -> StateEstimate:
 
         if dt_s <= 0.0:
@@ -145,6 +163,8 @@ class ThermalStateEstimator:
         winding_loss_W, fixed_loss_W = (
             self._losses(measurement)
         )
+        if "T_ambient_C" in measurement:
+            self.ambient_C = float(measurement["T_ambient_C"])
 
         # -------------------------------------------------------------
         # Nominal thermal model
@@ -159,9 +179,9 @@ class ThermalStateEstimator:
         )
 
         cooling_denominator = max(
-            0.10,
-            0.10 + 0.90 * flow,
-        )
+            0.05,
+            self.cooling_flow_offset + self.cooling_flow_gain * flow,
+        ) * max(0.05, min(1.0, float(cooling_effectiveness)))
 
         rfa_actual = (
             self.rfa /

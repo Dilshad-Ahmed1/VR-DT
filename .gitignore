@@ -5,6 +5,4 @@ __pycache__/
 *.mat
 *.fmu
 results/
-Manuscript/
-docs/
 .pytest_cache/

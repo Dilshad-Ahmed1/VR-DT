@@ -151,6 +151,17 @@ class FaultAwareAdaptiveController:
             0.08 * unbalance_severity
         )
 
+        electrical_mechanical_severity = max(
+            severity.get("load_overload", 0.0),
+            severity.get("mechanical_friction", 0.0),
+            severity.get("supply_degradation", 0.0),
+            severity.get("voltage_imbalance", 0.0),
+            severity.get("frequency_deviation", 0.0),
+        )
+        operating_fault_penalty = (
+            0.10 * electrical_mechanical_severity
+        )
+
         # -------------------------------------------------------------
         # 5. Sensor bias
         # -------------------------------------------------------------
@@ -185,6 +196,7 @@ class FaultAwareAdaptiveController:
             thermal_derate
             + cooling_penalty
             + unbalance_penalty
+            + operating_fault_penalty
             + sensor_penalty
         )
 

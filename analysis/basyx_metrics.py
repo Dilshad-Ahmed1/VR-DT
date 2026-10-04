@@ -15,6 +15,9 @@ import requests
 
 # These identifiers must match config/motor_aas_definition.json.
 SUBMODEL_IDS = {
+    "operational": "https://rvce.edu.in/aas/submodels/OperationalState",
+    "electrical": "https://rvce.edu.in/aas/submodels/ElectricalState",
+    "mechanical": "https://rvce.edu.in/aas/submodels/MechanicalState",
     "thermal": "https://rvce.edu.in/aas/submodels/ThermalState",
     "fault": "https://rvce.edu.in/aas/submodels/FaultState",
     "control": "https://rvce.edu.in/aas/submodels/ControlInterface",
@@ -102,6 +105,8 @@ class BaSyxEvaluationMetrics:
     successful_reads: int = 0
     failed_reads: int = 0
     timeout_reads: int = 0
+    snapshot_alignment_attempts: int = 0
+    snapshot_alignment_successes: int = 0
 
     sync_errors: dict[str, list[float]] = field(
         default_factory=lambda: {
@@ -321,6 +326,7 @@ class BaSyxEvaluationMetrics:
                 row = {
                     "simulation_time_s": simulation_time_s,
                     "update_success": False,
+                    "snapshot_alignment_success": False,
                     "write_latency_ms": write_latency_ms,
                     "read_latency_ms": float("nan"),
                     "end_to_end_loop_latency_ms": (
@@ -363,6 +369,7 @@ class BaSyxEvaluationMetrics:
             row = {
                 "simulation_time_s": simulation_time_s,
                 "update_success": False,
+                "snapshot_alignment_success": False,
                 "write_latency_ms": write_latency_ms,
                 "read_latency_ms": float("nan"),
                 "end_to_end_loop_latency_ms": cycle_latency_ms,
@@ -400,6 +407,7 @@ class BaSyxEvaluationMetrics:
             row = {
                 "simulation_time_s": simulation_time_s,
                 "update_success": False,
+                "snapshot_alignment_success": False,
                 "write_latency_ms": write_latency_ms,
                 "read_latency_ms": float("nan"),
                 "end_to_end_loop_latency_ms": cycle_latency_ms,
@@ -510,6 +518,45 @@ class BaSyxEvaluationMetrics:
                     f"{property_id_short}: {error_text}"
                 )
 
+        snapshot_id = str(
+            snapshot["operational"].get("SnapshotId", "")
+        )
+        snapshot_alignment_ok = bool(snapshot_id)
+        self.snapshot_alignment_attempts += 1
+        for submodel_name, submodel_id in SUBMODEL_IDS.items():
+            self.attempted_reads += 1
+            success, actual, latency_ms, error, timed_out = self._read_value(
+                submodel_id,
+                "SnapshotId",
+            )
+            self.read_latency_ms.append(latency_ms)
+            this_read_latencies.append(latency_ms)
+            if not success:
+                self.failed_reads += 1
+                if timed_out:
+                    self.timeout_reads += 1
+                snapshot_alignment_ok = False
+                read_errors.append(
+                    f"{submodel_name}.SnapshotId: {error}"
+                )
+                continue
+
+            self.successful_reads += 1
+            actual_id = (
+                str(actual.get("value"))
+                if isinstance(actual, dict)
+                else str(actual).strip('"')
+            )
+            if actual_id != snapshot_id:
+                snapshot_alignment_ok = False
+                read_errors.append(
+                    f"{submodel_name}.SnapshotId mismatch: "
+                    f"expected {snapshot_id!r}, got {actual_id!r}"
+                )
+
+        if snapshot_alignment_ok:
+            self.snapshot_alignment_successes += 1
+
         row["read_latency_ms"] = (
             statistics.mean(this_read_latencies)
             if this_read_latencies
@@ -521,6 +568,7 @@ class BaSyxEvaluationMetrics:
         ) * 1000.0
 
         row["error"] = " | ".join(read_errors)
+        row["snapshot_alignment_success"] = snapshot_alignment_ok
 
         self.end_to_end_latency_ms.append(
             row["end_to_end_loop_latency_ms"]
@@ -580,6 +628,15 @@ class BaSyxEvaluationMetrics:
             "read_successes": self.successful_reads,
             "read_failures": self.failed_reads,
             "read_timeouts": self.timeout_reads,
+            "snapshot_alignment_attempts": self.snapshot_alignment_attempts,
+            "snapshot_alignment_successes": self.snapshot_alignment_successes,
+            "snapshot_alignment_success_rate_percent": (
+                100.0
+                * self.snapshot_alignment_successes
+                / self.snapshot_alignment_attempts
+                if self.snapshot_alignment_attempts
+                else float("nan")
+            ),
             "read_success_rate_percent": (
                 100.0
                 * self.successful_reads

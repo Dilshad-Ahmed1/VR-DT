@@ -1,9 +1,9 @@
 {
-  "id": "https://rvce.edu.in/aas/motor/3ph_5kw_twin_01",
+  "id": "https://rvce.edu.in/aas/motor/msl_imc_18kw_twin_01",
   "idShort": "MotorDigitalTwinAAS",
   "assetInformation": {
     "assetKind": "Instance",
-    "globalAssetId": "https://rvce.edu.in/assets/motor/3ph_5kw_01"
+    "globalAssetId": "https://rvce.edu.in/assets/motor/msl_imc_18kw_01"
   },
   "submodels": [
     {
@@ -12,7 +12,12 @@
       "submodelElements": [
         { "modelType": "Property", "idShort": "SpeedPu", "valueType": "xs:double", "value": "1.0" },
         { "modelType": "Property", "idShort": "LoadTorquePu", "valueType": "xs:double", "value": "1.0" },
-        { "modelType": "Property", "idShort": "PowerLossActualW", "valueType": "xs:double", "value": "300.0" }
+        { "modelType": "Property", "idShort": "PowerLossActualW", "valueType": "xs:double", "value": "300.0" },
+        { "modelType": "Property", "idShort": "PlantProfile", "valueType": "xs:string", "value": "induction" },
+        { "modelType": "Property", "idShort": "MotorRatedOutputW", "valueType": "xs:double", "value": "18500.0" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     },
     {
@@ -20,34 +25,54 @@
       "idShort": "ElectricalState",
       "submodelElements": [
         { "modelType": "Property", "idShort": "VoltageRmsV", "valueType": "xs:double", "value": "400.0" },
-        { "modelType": "Property", "idShort": "CurrentRmsA", "valueType": "xs:double", "value": "9.5" },
-        { "modelType": "Property", "idShort": "PowerFactor", "valueType": "xs:double", "value": "0.85" },
-        { "modelType": "Property", "idShort": "ActivePowerW", "valueType": "xs:double", "value": "5600.0" },
-        { "modelType": "Property", "idShort": "ReactivePowerVar", "valueType": "xs:double", "value": "3470.0" },
-        { "modelType": "Property", "idShort": "TotalEnergyConsumedkWh", "valueType": "xs:double", "value": "0.0" }
+        { "modelType": "Property", "idShort": "CurrentRmsA", "valueType": "xs:double", "value": "32.85" },
+        { "modelType": "Property", "idShort": "PowerFactor", "valueType": "xs:double", "value": "0.898" },
+        { "modelType": "Property", "idShort": "ActivePowerW", "valueType": "xs:double", "value": "20443.95" },
+        { "modelType": "Property", "idShort": "ReactivePowerVar", "valueType": "xs:double", "value": "10030.0" },
+        { "modelType": "Property", "idShort": "TotalEnergyConsumedkWh", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "FrequencyHz", "valueType": "xs:double", "value": "50.0" },
+        { "modelType": "Property", "idShort": "VoltageUnbalancePercent", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "RatedVoltageRmsV", "valueType": "xs:double", "value": "400.0" },
+        { "modelType": "Property", "idShort": "RatedCurrentRmsA", "valueType": "xs:double", "value": "32.85" },
+        { "modelType": "Property", "idShort": "Efficiency", "valueType": "xs:double", "value": "0.9049" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     },
     {
       "id": "https://rvce.edu.in/aas/submodels/MechanicalState",
       "idShort": "MechanicalState",
       "submodelElements": [
-        { "modelType": "Property", "idShort": "SpeedRpm", "valueType": "xs:double", "value": "1498.0" },
-        { "modelType": "Property", "idShort": "SpeedRadS", "valueType": "xs:double", "value": "156.87" },
-        { "modelType": "Property", "idShort": "ElectromagneticTorqueNm", "valueType": "xs:double", "value": "31.83" },
-        { "modelType": "Property", "idShort": "LoadTorqueNm", "valueType": "xs:double", "value": "31.83" },
+        { "modelType": "Property", "idShort": "SpeedRpm", "valueType": "xs:double", "value": "1462.5" },
+        { "modelType": "Property", "idShort": "SpeedRadS", "valueType": "xs:double", "value": "153.15" },
+        { "modelType": "Property", "idShort": "ElectromagneticTorqueNm", "valueType": "xs:double", "value": "123.0" },
+        { "modelType": "Property", "idShort": "LoadTorqueNm", "valueType": "xs:double", "value": "120.79" },
         { "modelType": "Property", "idShort": "UsefulOutputWorkkWh", "valueType": "xs:double", "value": "0.0" },
-        { "modelType": "Property", "idShort": "VibrationAmplitudeMmS", "valueType": "xs:double", "value": "0.8" },
-        { "modelType": "Property", "idShort": "UnbalanceSeverity", "valueType": "xs:double", "value": "0.0" }
+        { "modelType": "Property", "idShort": "VibrationAmplitudeMmS", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "UnbalanceSeverity", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SynchronousSpeedRpm", "valueType": "xs:double", "value": "1500.0" },
+        { "modelType": "Property", "idShort": "SlipPercent", "valueType": "xs:double", "value": "2.5" },
+        { "modelType": "Property", "idShort": "LoadCommandTorqueNm", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     },
     {
       "id": "https://rvce.edu.in/aas/submodels/ThermalState",
       "idShort": "ThermalState",
       "submodelElements": [
-        { "modelType": "Property", "idShort": "WindingTemperatureK", "valueType": "xs:double", "value": "298.15" },
-        { "modelType": "Property", "idShort": "FrameTemperatureK", "valueType": "xs:double", "value": "298.15" },
-        { "modelType": "Property", "idShort": "WindingSensorMeasuredK", "valueType": "xs:double", "value": "298.15" },
-        { "modelType": "Property", "idShort": "ThermalMarginK", "valueType": "xs:double", "value": "121.85" }
+        { "modelType": "Property", "idShort": "WindingTemperatureK", "valueType": "xs:double", "value": "363.15" },
+        { "modelType": "Property", "idShort": "FrameTemperatureK", "valueType": "xs:double", "value": "350.6327" },
+        { "modelType": "Property", "idShort": "WindingSensorMeasuredK", "valueType": "xs:double", "value": "363.15" },
+        { "modelType": "Property", "idShort": "ThermalMarginK", "valueType": "xs:double", "value": "30.0" },
+        { "modelType": "Property", "idShort": "AmbientTemperatureK", "valueType": "xs:double", "value": "293.15" },
+        { "modelType": "Property", "idShort": "PredictedTemperature30sK", "valueType": "xs:double", "value": "363.15" },
+        { "modelType": "Property", "idShort": "PredictedTemperature60sK", "valueType": "xs:double", "value": "363.15" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     },
     {
@@ -58,7 +83,20 @@
         { "modelType": "Property", "idShort": "SensorFreezeActive", "valueType": "xs:boolean", "value": "false" },
         { "modelType": "Property", "idShort": "CoolingEfficiencyFactor", "valueType": "xs:double", "value": "1.0" },
         { "modelType": "Property", "idShort": "MechanicalUnbalanceActive", "valueType": "xs:boolean", "value": "false" },
-        { "modelType": "Property", "idShort": "EstimatedFaultSeverity", "valueType": "xs:double", "value": "0.0" }
+        { "modelType": "Property", "idShort": "EstimatedFaultSeverity", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "FaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "FaultType", "valueType": "xs:string", "value": "healthy" },
+        { "modelType": "Property", "idShort": "PrimaryDetectedFault", "valueType": "xs:string", "value": "healthy" },
+        { "modelType": "Property", "idShort": "TrueFaultSeverity", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "CoolingFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "OverloadFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "MechanicalFrictionFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "VoltageImbalanceFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "SupplyDegradationFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "FrequencyDeviationFaultActive", "valueType": "xs:boolean", "value": "false" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     },
     {
@@ -67,7 +105,11 @@
       "submodelElements": [
         { "modelType": "Property", "idShort": "CoolingCommandPu", "valueType": "xs:double", "value": "1.0" },
         { "modelType": "Property", "idShort": "LoadDeratingCommandPu", "valueType": "xs:double", "value": "1.0" },
-        { "modelType": "Property", "idShort": "OperatingMode", "valueType": "xs:string", "value": "NORMAL" }
+        { "modelType": "Property", "idShort": "OperatingMode", "valueType": "xs:string", "value": "NORMAL" },
+        { "modelType": "Property", "idShort": "ControllerName", "valueType": "xs:string", "value": "baseline" },
+        { "modelType": "Property", "idShort": "SimulationTimeSeconds", "valueType": "xs:double", "value": "0.0" },
+        { "modelType": "Property", "idShort": "SnapshotTimestampUtc", "valueType": "xs:string", "value": "" },
+        { "modelType": "Property", "idShort": "SnapshotId", "valueType": "xs:string", "value": "" }
       ]
     }
   ]

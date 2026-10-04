@@ -17,7 +17,13 @@ class ThermalPredictor:
     def __init__(self, estimator: ThermalStateEstimator) -> None:
         self.estimator = estimator
 
-    def _rollout(self, horizon_s: float, measurement: dict[str, float], cooling_flow_pu: float) -> float:
+    def _rollout(
+        self,
+        horizon_s: float,
+        measurement: dict[str, float],
+        cooling_flow_pu: float,
+        cooling_effectiveness: float,
+    ) -> float:
         Tw = self.estimator.Tw_C
         Tf = self.estimator.Tf_C
         dt = 0.5
@@ -28,14 +34,13 @@ class ThermalPredictor:
         cw = self.estimator.cw
         cf = self.estimator.cf
 
-        total_loss = max(
-            0.0,
-            float(measurement.get("P_electrical_W", 0.0))
-            - float(measurement.get("P_shaft_W", 0.0)),
-        )
-        pw = total_loss * self.estimator.winding_loss_fraction
-        pf = total_loss * self.estimator.fixed_loss_fraction
-        cooling_denominator = max(0.10, 0.10 + 0.90 * max(0.0, min(1.0, cooling_flow_pu)))
+        pw, pf = self.estimator._losses(measurement)
+        cooling_flow = max(0.0, min(1.0, cooling_flow_pu))
+        cooling_denominator = max(
+            0.05,
+            self.estimator.cooling_flow_offset
+            + self.estimator.cooling_flow_gain * cooling_flow,
+        ) * max(0.05, min(1.0, cooling_effectiveness))
         rfa_actual = rfa / cooling_denominator
 
         for _ in range(steps):
@@ -45,8 +50,23 @@ class ThermalPredictor:
             Tf += ((pf + q_wf - q_fa) / cf) * dt
         return Tw
 
-    def predict(self, measurement: dict[str, float], cooling_flow_pu: float) -> ThermalForecast:
+    def predict(
+        self,
+        measurement: dict[str, float],
+        cooling_flow_pu: float,
+        cooling_effectiveness: float = 1.0,
+    ) -> ThermalForecast:
         return ThermalForecast(
-            predicted_30s_C=self._rollout(30.0, measurement, cooling_flow_pu),
-            predicted_60s_C=self._rollout(60.0, measurement, cooling_flow_pu),
+            predicted_30s_C=self._rollout(
+                30.0,
+                measurement,
+                cooling_flow_pu,
+                cooling_effectiveness,
+            ),
+            predicted_60s_C=self._rollout(
+                60.0,
+                measurement,
+                cooling_flow_pu,
+                cooling_effectiveness,
+            ),
         )

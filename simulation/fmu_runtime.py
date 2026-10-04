@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -10,17 +11,29 @@ import pandas as pd
 from fmpy import extract, read_model_description
 from fmpy.fmi2 import FMU2Slave
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 INPUTS = [
     "u_load_torque_pu",
     "u_speed_pu",
     "u_cooling_flow_pu",
+]
+
+OPTIONAL_INPUTS = [
     "f_sensor_bias_C",
     "f_sensor_freeze",
     "f_cooling_eff",
     "f_rth_degradation",
     "f_unbalance_severity",
-    "f_voltage_imbalance_pu",
+    "u_ambient_C",
+    "f_load_overload_pu",
+    "f_mechanical_friction_factor",
+    "f_voltage_unbalance_pu",
+    "f_supply_voltage_degradation_pu",
+    "f_supply_frequency_deviation_pu",
 ]
 
 OUTPUTS = [
@@ -35,14 +48,47 @@ OUTPUTS = [
     "P_shaft_W",
     "P_loss_total_W",
     "I_rms_A",
-    "current_ripple_percent",
     "vibration_mm_s_out",
     "thermal_margin_to_critical_K",
     "thermal_state",
 ]
 
-OPTIONAL_INPUTS = {"f_voltage_imbalance_pu"}
-OPTIONAL_OUTPUTS = {"current_ripple_percent"}
+OPTIONAL_OUTPUTS = [
+    "T_winding_K",
+    "T_frame_K",
+    "T_ambient_K",
+    "T_ambient_C",
+    "P_motor_losses_W",
+    "P_winding_losses_W",
+    "P_fixed_losses_W",
+    "current_pu",
+    "load_torque_pu",
+    "power_factor",
+    "reactive_power_var",
+    "supply_frequency_Hz",
+    "line_voltage_rms_V",
+    "voltage_unbalance_percent",
+    "cooling_effectiveness",
+    "mechanical_unbalance_supported",
+]
+
+_OPTIONAL_INPUT_DEFAULTS: dict[str, Any] = {
+    "f_sensor_bias_C": 0.0,
+    "f_sensor_freeze": False,
+    "f_cooling_eff": 1.0,
+    "f_rth_degradation": 1.0,
+    "f_unbalance_severity": 0.0,
+    "u_ambient_C": 20.0,
+    "f_load_overload_pu": 0.0,
+    "f_mechanical_friction_factor": 1.0,
+    "f_voltage_unbalance_pu": 0.0,
+    "f_supply_voltage_degradation_pu": 0.0,
+    "f_supply_frequency_deviation_pu": 0.0,
+}
+
+# OpenModelica 1.27.1's exported CVODE FMU fails above this interval during
+# the load transient; larger Digital Twin cycles are subdivided.
+_INDUCTION_MAX_COMMUNICATION_STEP_S = 0.1
 
 
 class FMURuntime:
@@ -62,17 +108,26 @@ class FMURuntime:
             raise RuntimeError("FMU is not a Co-Simulation FMU.")
 
         by_name = {v.name: v for v in self.md.modelVariables}
-        missing = [
-            n for n in INPUTS + OUTPUTS
-            if n not in by_name
-            and n not in OPTIONAL_INPUTS
-            and n not in OPTIONAL_OUTPUTS
-        ]
+        if "InductionMotorDigitalTwin18kW" not in str(self.md.modelName):
+            raise RuntimeError(
+                "CGVR uses only the MSL 18.5 kW induction-motor FMU; "
+                f"received {self.md.modelName!r}."
+            )
+        missing = [n for n in INPUTS + OUTPUTS if n not in by_name]
         if missing:
             raise KeyError(f"FMU variables not found: {missing}")
 
-        self.in_var = {n: by_name[n] for n in INPUTS if n in by_name}
-        self.out_var = {n: by_name[n] for n in OUTPUTS if n in by_name}
+        self.in_var = {
+            n: by_name[n]
+            for n in INPUTS + OPTIONAL_INPUTS
+            if n in by_name
+        }
+        self.out_var = {
+            n: by_name[n]
+            for n in OUTPUTS + OPTIONAL_OUTPUTS
+            if n in by_name
+        }
+        self.plant_profile = "induction"
 
         self.in_vr = {n: v.valueReference for n, v in self.in_var.items()}
         self.out_vr = {n: v.valueReference for n, v in self.out_var.items()}
@@ -101,12 +156,7 @@ class FMURuntime:
             "u_load_torque_pu": 1.0,
             "u_speed_pu": 1.0,
             "u_cooling_flow_pu": 1.0,
-            "f_sensor_bias_C": 0.0,
-            "f_sensor_freeze": False,
-            "f_cooling_eff": 1.0,
-            "f_rth_degradation": 1.0,
-            "f_unbalance_severity": 0.0,
-            "f_voltage_imbalance_pu": 0.0,
+            **_OPTIONAL_INPUT_DEFAULTS,
         }
         if inputs:
             initial.update(inputs)
@@ -122,6 +172,25 @@ class FMURuntime:
 
     def set_inputs(self, inputs: dict[str, Any]) -> None:
         """Set inputs using the FMI primitive matching their declared type."""
+        unknown = sorted(
+            set(inputs) - set(INPUTS) - set(OPTIONAL_INPUTS)
+        )
+        if unknown:
+            raise KeyError(f"Unknown FMU inputs: {unknown}")
+
+        unsupported = {
+            name: value
+            for name, value in inputs.items()
+            if name in OPTIONAL_INPUTS
+            and name not in self.in_var
+            and value != _OPTIONAL_INPUT_DEFAULTS[name]
+        }
+        if unsupported:
+            raise ValueError(
+                "Active plant inputs are unsupported by this FMU: "
+                f"{unsupported}"
+            )
+
         real_vr: list[int] = []
         real_val: list[float] = []
         int_vr: list[int] = []
@@ -161,7 +230,7 @@ class FMURuntime:
         int_names, int_vr = [], []
         bool_names, bool_vr = [], []
 
-        for name in OUTPUTS:
+        for name in OUTPUTS + OPTIONAL_OUTPUTS:
             if name not in self.out_var:
                 continue
             kind = self._kind(self.out_var[name])
@@ -195,7 +264,11 @@ class FMURuntime:
             for name, val in zip(bool_names, vals):
                 result[name] = float(1.0 if val else 0.0)
 
-        return {name: result[name] for name in OUTPUTS if name in result}
+        return result
+
+    def supports_input(self, name: str) -> bool:
+        """Whether this FMU declares an optional or required input."""
+        return name in self.in_var
 
     def step(
         self,
@@ -212,16 +285,30 @@ class FMURuntime:
             self.set_inputs(inputs)
 
         t0 = time.perf_counter()
-        status = self.fmu.doStep(
-            currentCommunicationPoint=self.current_time,
-            communicationStepSize=step_size,
+        end_time = self.current_time + step_size
+        max_step_size = (
+            _INDUCTION_MAX_COMMUNICATION_STEP_S
+            if self.plant_profile == "induction"
+            else step_size
         )
+        while self.current_time < end_time - 1e-12:
+            communication_step = min(
+                max_step_size,
+                end_time - self.current_time,
+            )
+            status = self.fmu.doStep(
+                currentCommunicationPoint=self.current_time,
+                communicationStepSize=communication_step,
+            )
+            if status not in (None, 0):
+                raise RuntimeError(
+                    "FMU doStep returned non-success status "
+                    f"{status} at t={self.current_time:g}s "
+                    f"for {communication_step:g}s step."
+                )
+            self.current_time += communication_step
         elapsed = time.perf_counter() - t0
 
-        if status not in (None, 0):
-            raise RuntimeError(f"FMU doStep returned non-success status: {status}")
-
-        self.current_time += step_size
         return self.get_outputs(), elapsed
 
     def close(self) -> None:
@@ -252,32 +339,49 @@ def run(
     step: float,
     fault_time: float,
     out_csv: Path,
+    scenario: str = "cooling",
 ) -> None:
-    """Backward-compatible FMU smoke test."""
+    """Run an induction FMU smoke test through the shared fault injector."""
+    from twin.fault_injector import SCENARIO_DEFAULTS, injector_from_scenario
+
+    if scenario != "healthy" and scenario not in SCENARIO_DEFAULTS:
+        raise ValueError(f"Unsupported induction scenario: {scenario}")
+    injector = (
+        None
+        if scenario == "healthy"
+        else injector_from_scenario(
+            scenario,
+            start_tick=max(0, int(round(fault_time / step))),
+            step_s=step,
+        )
+    )
+    base_inputs: dict[str, Any] = {
+        "u_load_torque_pu": 1.0,
+        "u_speed_pu": 1.0,
+        "u_cooling_flow_pu": 1.0,
+        **_OPTIONAL_INPUT_DEFAULTS,
+    }
     with FMURuntime(fmu_path, stop_time=stop_time) as runtime:
-        runtime.initialize()
+        runtime.initialize(base_inputs)
         rows: list[dict[str, Any]] = []
+        tick = 0
         while runtime.current_time < stop_time - 1e-12:
-            fault_on = runtime.current_time >= fault_time
-            inputs = {
-                "u_load_torque_pu": 1.0,
-                "u_speed_pu": 1.0,
-                "u_cooling_flow_pu": 1.0,
-                "f_sensor_bias_C": 10.0 if fault_on else 0.0,
-                "f_sensor_freeze": False,
-                "f_cooling_eff": 0.40 if fault_on else 1.0,
-                "f_rth_degradation": 1.0,
-                "f_unbalance_severity": 0.75 if fault_on else 0.0,
-            }
+            inputs = dict(base_inputs)
+            fault_on = injector is not None and tick >= injector.start_tick
+            if injector is not None:
+                inputs = injector.apply(tick, inputs)
             actual_step = min(step, stop_time - runtime.current_time)
             values, solver_time = runtime.step(actual_step, inputs)
             row = {
+                "tick": tick,
                 "time_s": runtime.current_time,
                 "fault_active": fault_on,
+                "fault_type": scenario,
                 "solver_step_time_s": solver_time,
             }
             row.update(values)
             rows.append(row)
+            tick += 1
 
         df = pd.DataFrame(rows)
         out_csv = Path(out_csv).resolve()
@@ -295,9 +399,17 @@ def main() -> int:
     parser.add_argument("--stop", type=float, default=180.0)
     parser.add_argument("--step", type=float, default=0.5)
     parser.add_argument("--fault-time", type=float, default=60.0)
+    parser.add_argument("--scenario", default="cooling")
     parser.add_argument("--output", type=Path, default=Path("results/smoke_test.csv"))
     args = parser.parse_args()
-    run(args.fmu.resolve(), args.stop, args.step, args.fault_time, args.output.resolve())
+    run(
+        args.fmu.resolve(),
+        args.stop,
+        args.step,
+        args.fault_time,
+        args.output.resolve(),
+        args.scenario,
+    )
     return 0
 
 

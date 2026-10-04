@@ -10,3 +10,4 @@ streamlit
 pytest
 fastapi
 uvicorn
+websockets

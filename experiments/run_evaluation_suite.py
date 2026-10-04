@@ -1,221 +1,166 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
+from typing import Any
+
+from experiments.experiment_runner import SCENARIOS
 
 
-SCENARIOS = [
-    "healthy",
-    "cooling",
-    "sensor_bias",
-    "sensor_freeze",
-    "rth_degradation",
-    "unbalance",
-    "combined",
-]
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_FMU = ROOT / "models" / "InductionMotorDigitalTwin18kW.fmu"
+CONTROLLERS = ("baseline", "adaptive", "constrained")
+METRICS = (
+    "maximum_winding_temperature_C",
+    "time_above_critical_s",
+    "fault_detection_latency_s",
+    "fault_severity_mae",
+    "prediction_mae_30s_C",
+    "prediction_mae_60s_C",
+    "energy_total_kWh",
+    "useful_work_total_kWh",
+    "mean_load_command_pu",
+    "mean_solver_step_time_ms",
+    "real_time_factor",
+)
 
-CONTROLLERS = [
-    "baseline",
-    "adaptive",
-    "constrained",
-]
 
-
-def run_one(
+def _run_case(
+    *,
     fmu: Path,
     scenario: str,
     controller: str,
-    stop: float,
-    step: float,
-    fault_time: float,
+    stop_s: float,
+    step_s: float,
+    fault_time_s: float,
     output_dir: Path,
-    realtime: bool = False,
-) -> Path:
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    output = (
-        output_dir
-        / f"{scenario}_{controller}_{int(stop)}s.csv"
-    )
-
-    print("\n" + "=" * 72)
-    print(f"Running scenario   : {scenario}")
-    print(f"Controller         : {controller}")
-    print(f"Simulation time    : {stop:.1f} s")
-    print(f"Communication step : {step:.3f} s")
-    print(f"Fault time         : {fault_time:.1f} s")
-    print(f"Output             : {output}")
-    print("=" * 72)
-
-    cmd = [
+    basyx: bool,
+    basyx_host: str,
+    basyx_period_s: float,
+) -> dict[str, Any]:
+    name = f"{scenario}_{controller}"
+    csv_path = output_dir / f"{name}.csv"
+    command = [
         sys.executable,
         "-m",
         "experiments.experiment_runner",
         "--fmu",
-        str(fmu.resolve()),
+        str(fmu),
+        "--plant-profile",
+        "induction",
         "--scenario",
         scenario,
         "--controller",
         controller,
         "--stop",
-        str(stop),
+        str(stop_s),
         "--step",
-        str(step),
+        str(step_s),
         "--fault-time",
-        str(fault_time),
+        str(fault_time_s),
         "--output",
-        str(output.resolve()),
+        str(csv_path),
     ]
-
-    if realtime:
-        cmd.append("--realtime")
-
-    result = subprocess.run(cmd)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Experiment failed: "
-            f"scenario={scenario}, controller={controller}, "
-            f"returncode={result.returncode}"
+    if basyx:
+        command.extend(
+            ["--basyx", "--basyx-host", basyx_host, "--basyx-period", str(basyx_period_s)]
         )
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+    log_path = output_dir / f"{name}.log"
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    metrics_path = csv_path.with_name(f"{csv_path.stem}_metrics.json")
+    metrics: dict[str, Any] = {}
+    if metrics_path.is_file():
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    return {
+        "scenario": scenario,
+        "controller": controller,
+        "return_code": completed.returncode,
+        "csv": str(csv_path),
+        "log": str(log_path),
+        "metrics": str(metrics_path),
+        "results": metrics,
+        "error": "" if completed.returncode == 0 else completed.stderr[-4000:],
+    }
 
-    if not output.exists():
-        raise FileNotFoundError(
-            f"Experiment reported success but output file does not exist:\n"
-            f"{output}"
-        )
 
-    print(f"\n[SUCCESS] {output}")
-
-    return output
+def _write_campaign(output_dir: Path, runs: list[dict[str, Any]]) -> None:
+    (output_dir / "campaign.json").write_text(
+        json.dumps(runs, indent=2, allow_nan=True),
+        encoding="utf-8",
+    )
+    columns = ["scenario", "controller", "return_code", *METRICS]
+    with (output_dir / "comparison.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        for run in runs:
+            values = run.get("results", {})
+            writer.writerow({
+                "scenario": run["scenario"],
+                "controller": run["controller"],
+                "return_code": run["return_code"],
+                **{name: values.get(name, "") for name in METRICS},
+            })
 
 
 def main() -> int:
-
     parser = argparse.ArgumentParser(
-        description="Run the complete Motor Digital Twin evaluation suite."
+        description="Run a timestamped scenario/controller campaign for the CGVR induction Twin."
     )
-
-    parser.add_argument(
-        "--fmu",
-        required=True,
-        type=Path,
-    )
-
-    parser.add_argument(
-        "--stop",
-        type=float,
-        default=1800.0,
-        help="Simulation duration in seconds.",
-    )
-
-    parser.add_argument(
-        "--step",
-        type=float,
-        default=0.5,
-        help="FMI communication step in seconds.",
-    )
-
-    parser.add_argument(
-        "--fault-time",
-        type=float,
-        default=600.0,
-        help="Fault injection time in seconds.",
-    )
-
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("results/evaluation"),
-    )
-
-    parser.add_argument(
-        "--scenario",
-        choices=["all"] + SCENARIOS,
-        default="all",
-    )
-
-    parser.add_argument(
-        "--controller",
-        choices=["all"] + CONTROLLERS,
-        default="all",
-    )
-
-    parser.add_argument(
-        "--realtime",
-        action="store_true",
-        help="Pace every case against wall clock and record deadline metrics.",
-    )
-
+    parser.add_argument("--fmu", type=Path, default=DEFAULT_FMU)
+    parser.add_argument("--scenario", choices=["all", *sorted(SCENARIOS)], default="all")
+    parser.add_argument("--controller", choices=["all", *CONTROLLERS], default="all")
+    parser.add_argument("--stop", type=float, default=800.0)
+    parser.add_argument("--step", type=float, default=0.5)
+    parser.add_argument("--fault-time", type=float, default=350.0)
+    parser.add_argument("--output-root", type=Path, default=ROOT / "results" / "induction_campaigns")
+    parser.add_argument("--with-basyx", action="store_true")
+    parser.add_argument("--basyx-host", default="http://localhost:8081")
+    parser.add_argument("--basyx-period", type=float, default=10.0)
     args = parser.parse_args()
 
-    if not args.fmu.exists():
-        raise FileNotFoundError(
-            f"FMU not found:\n{args.fmu}"
-        )
+    fmu = args.fmu.resolve()
+    if not fmu.is_file():
+        parser.error(f"Induction FMU not found: {fmu}; export it first.")
+    if args.stop <= args.fault_time or args.fault_time < 0 or args.step <= 0:
+        parser.error("Require stop > fault-time >= 0 and step > 0.")
 
-    scenarios = (
-        SCENARIOS
-        if args.scenario == "all"
-        else [args.scenario]
-    )
+    scenarios = sorted(SCENARIOS) if args.scenario == "all" else [args.scenario]
+    controllers = CONTROLLERS if args.controller == "all" else [args.controller]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = (args.output_root / stamp).resolve()
+    output_dir.mkdir(parents=True, exist_ok=False)
 
-    controllers = (
-        CONTROLLERS
-        if args.controller == "all"
-        else [args.controller]
-    )
-
+    runs: list[dict[str, Any]] = []
     total = len(scenarios) * len(controllers)
-
-    print()
-    print("=" * 72)
-    print("MOTOR DIGITAL TWIN - EVALUATION SUITE")
-    print("=" * 72)
-    print(f"FMU          : {args.fmu}")
-    print(f"Scenarios    : {scenarios}")
-    print(f"Controllers  : {controllers}")
-    print(f"Experiments  : {total}")
-    print(f"Stop time    : {args.stop} s")
-    print(f"Step         : {args.step} s")
-    print(f"Fault time   : {args.fault_time} s")
-    print(f"Output dir   : {args.output_dir.resolve()}")
-    print(f"Realtime     : {args.realtime}")
-    print("=" * 72)
-
-    completed = []
-
-    for scenario in scenarios:
-        for controller in controllers:
-
-            output = run_one(
-                fmu=args.fmu,
-                scenario=scenario,
-                controller=controller,
-                stop=args.stop,
-                step=args.step,
-                fault_time=args.fault_time,
-                output_dir=args.output_dir,
-                realtime=args.realtime,
-            )
-
-            completed.append(output)
-
-    print()
-    print("=" * 72)
-    print("EVALUATION SUITE COMPLETED")
-    print("=" * 72)
-    print(f"Completed experiments : {len(completed)}/{total}")
-
-    for path in completed:
-        print(f"  ✓ {path}")
-
-    print("=" * 72)
-
-    return 0
+    for index, (scenario, controller) in enumerate(
+        ((scenario, controller) for scenario in scenarios for controller in controllers),
+        start=1,
+    ):
+        aas_enabled = args.with_basyx and scenario == "combined_supported" and controller == "constrained"
+        print(f"[{index}/{total}] {scenario}/{controller}" + (" + BaSyx" if aas_enabled else ""), flush=True)
+        runs.append(_run_case(
+            fmu=fmu,
+            scenario=scenario,
+            controller=controller,
+            stop_s=args.stop,
+            step_s=args.step,
+            fault_time_s=args.fault_time,
+            output_dir=output_dir,
+            basyx=aas_enabled,
+            basyx_host=args.basyx_host,
+            basyx_period_s=args.basyx_period,
+        ))
+        _write_campaign(output_dir, runs)
+    failed = sum(run["return_code"] != 0 for run in runs)
+    print(f"Campaign: {output_dir}")
+    print(f"Completed: {len(runs) - failed}/{len(runs)}; failed: {failed}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

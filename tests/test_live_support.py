@@ -18,12 +18,37 @@ def test_fault_profiles_share_one_input_path():
         "u_load_torque_pu": 1.0,
         "f_cooling_eff": 1.0,
         "f_unbalance_severity": 0.0,
-        "f_voltage_imbalance_pu": 0.0,
+        "f_voltage_unbalance_pu": 0.0,
         "f_sensor_bias_C": 0.0,
     }
     assert injector_from_scenario("sudden_overload", start_tick=2, step_s=0.5).apply(2, base)["u_load_torque_pu"] > 1.0
     assert injector_from_scenario("cooling_failure", start_tick=2, step_s=0.5).apply(20, base)["f_cooling_eff"] < 1.0
-    assert injector_from_scenario("voltage_imbalance", start_tick=2, step_s=0.5).apply(20, base)["f_voltage_imbalance_pu"] > 0.0
+    assert injector_from_scenario("voltage_imbalance", start_tick=2, step_s=0.5).apply(20, base)["f_voltage_unbalance_pu"] > 0.0
+
+
+def test_ground_truth_severity_tracks_injected_profile():
+    drift = injector_from_scenario(
+        "sensor_drift",
+        start_tick=10,
+        step_s=0.5,
+        duration_s=20.0,
+    )
+    assert drift.severity_at(9)["sensor_bias"] == 0.0
+    assert drift.severity_at(10)["sensor_bias"] == 0.0
+    assert 0.0 < drift.severity_at(20)["sensor_bias"] < 1.0
+
+    overload = injector_from_scenario("sudden_overload", start_tick=10, step_s=0.5)
+    assert overload.severity_at(9)["overload"] == 0.0
+    assert overload.severity_at(10)["overload"] == 1.0
+
+    cooling = injector_from_scenario(
+        "cooling_failure",
+        start_tick=10,
+        step_s=0.5,
+        duration_s=20.0,
+    )
+    assert cooling.severity_at(10)["cooling"] == 0.0
+    assert cooling.severity_at(20)["cooling"] > cooling.severity_at(15)["cooling"]
 
 
 def test_trial_logger_records_mode_and_action(tmp_path):
